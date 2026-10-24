@@ -148,7 +148,7 @@ code { font-family: var(--num); font-size: 12px; }
 
   <section class="card zone" id="frontCard">
     <div class="card-head">
-      <div><h2>Front light</h2><small>White · 2700–6500 K</small></div>
+      <div><h2 id="frontTitle">Front light</h2><small id="frontSub">White · 2700–6500 K</small></div>
       <button class="switch" id="frontOn" role="switch" aria-checked="true" aria-label="Front light on"></button>
     </div>
     <div class="row"><label for="frontBri">Brightness <output id="frontBriOut">80 %</output></label>
@@ -160,10 +160,10 @@ code { font-family: var(--num); font-size: 12px; }
 
   <section class="card zone" id="backCard">
     <div class="card-head">
-      <div><h2>Back light</h2><small>Colour · full RGB</small></div>
+      <div><h2>Back light</h2><small id="backSub">Colour · full RGB</small></div>
       <button class="switch" id="backOn" role="switch" aria-checked="true" aria-label="Back light on"></button>
     </div>
-    <div class="row"><label for="backBri">Brightness <output id="backBriOut">60 %</output></label>
+    <div class="row" id="backBriRow"><label for="backBri">Brightness <output id="backBriOut">60 %</output></label>
       <input type="range" id="backBri" class="t-bright" min="1" max="100" value="60"></div>
     <div class="row"><label for="backHue">Colour <output id="backHueOut">260°</output></label>
       <input type="range" id="backHue" class="t-hue" min="0" max="359" value="260"></div>
@@ -255,7 +255,7 @@ code { font-family: var(--num); font-size: 12px; }
 <script src="protocol.js"></script>
 <script>
 'use strict';
-const APP_VERSION = '1.5'; // shown in the app; keep in step with VERSION in sw.js
+const APP_VERSION = '1.6'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -293,8 +293,22 @@ const HUE_NAMES = [[15,'red'],[40,'orange'],[65,'yellow'],[150,'green'],[195,'cy
 const hueName = (h, s) => s < 20 ? 'white' : HUE_NAMES.find(([lim]) => h < lim)[1];
 
 // ---------- rendering ----------
+// On some models (e.g. Massignano-style) front and back share one channel: one on/off and brightness,
+// white settings drive the front, colour settings drive the back.
+const shared = () => +cfg.epBack === +cfg.epFront && !cfg.backId;
+function normalise() {
+  if (!shared()) return;
+  const on = state.front.on || state.back.on;
+  const bri = state.front.on ? state.front.bri : state.back.bri;
+  state.front.on = state.back.on = on; state.front.bri = state.back.bri = bri;
+}
 function render() {
-  const f = state.front, b = state.back;
+  normalise();
+  const f = state.front, b = state.back, sh = shared();
+  $('frontTitle').textContent = sh ? 'Light' : 'Front light';
+  $('frontSub').textContent = sh ? 'Front and back together · warmth sets the front' : 'White · 2700–6500 K';
+  $('backSub').textContent = sh ? 'Colour of the back light' : 'Colour · full RGB';
+  $('backOn').hidden = sh; $('backBriRow').hidden = sh;
   $('title').textContent = cfg.name || 'Ceiling light';
   document.title = cfg.name || 'Ceiling Light';
   $('frontOn').setAttribute('aria-checked', f.on); $('backOn').setAttribute('aria-checked', b.on);
@@ -443,12 +457,14 @@ function sendFront(what) {
 }
 function sendBack(what) {
   const b = state.back, ep = +cfg.epBack, d = cfg.backId || cfg.meshId;
+  if (shared() && what !== 'color') return; // power and brightness are handled by the front controls
   if (what === 'power') return send('b.power', b.on ? Z.level(ep, P.percentToLevel(b.bri)) : Z.off(ep), d);
   if (!b.on) return;
   if (what === 'bri') send('b.bri', Z.level(ep, P.percentToLevel(b.bri)), d);
   if (what === 'color') send('b.color', Z.hueSat(ep, Math.round(b.hue / 360 * 254), Math.round(b.sat * 2.54)), d);
 }
 function applyAll() {
+  normalise();
   sendFront('power'); if (state.front.on) sendFront('temp');
   sendBack('power'); if (state.back.on) sendBack('color');
 }
@@ -464,7 +480,11 @@ bindRange('backBri', (v) => { state.back.bri = v; state.back.on = true; }, () =>
 bindRange('backHue', (v) => { state.back.hue = v; }, () => sendBack('color'));
 bindRange('backSat', (v) => { state.back.sat = v; }, () => sendBack('color'));
 
-$('frontOn').onclick = () => { state.front.on = !state.front.on; render(); sendFront('power'); if (state.front.on) sendFront('temp'); };
+$('frontOn').onclick = () => {
+  state.front.on = !state.front.on;
+  if (shared()) { state.back.on = state.front.on; render(); applyAll(); return; }
+  render(); sendFront('power'); if (state.front.on) sendFront('temp');
+};
 $('backOn').onclick = () => { state.back.on = !state.back.on; render(); sendBack('power'); if (state.back.on) sendBack('color'); };
 $('power').onclick = () => {
   const anyOn = state.front.on || state.back.on;
