@@ -137,6 +137,13 @@ input:focus, select:focus { border-color: #5b6370; }
 .log { font: 11px/1.45 Consolas, monospace; color: var(--muted); background: var(--night); border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 120px; overflow: auto; white-space: pre-wrap; user-select: text; }
 .toast { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--text); color: #0a0b0d; padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.5); z-index: 5; white-space: nowrap; }
 
+/* phone (Android app) */
+.android-only { display: none; }
+.android .android-only { display: block; }
+.android .pc-only { display: none !important; }
+.android .stage { height: 190px; }
+.android .disc { width: 128px; height: 128px; }
+.android header { padding-top: 16px; }
 ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
@@ -148,11 +155,11 @@ input:focus, select:focus { border-color: #5b6370; }
       <h1 id="title">Ceiling light</h1>
       <button class="status" id="status" type="button" data-s="Idle" title="Connect now"><i></i><span id="statusText">Not connected</span></button>
     </div>
-    <button class="ico" id="pin" type="button" aria-pressed="false" title="Keep open" aria-label="Keep window open">
+    <button class="ico pc-only" id="pin" type="button" aria-pressed="false" title="Keep open" aria-label="Keep window open">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8V4h6v6.8l3 3.2H6z"/></svg></button>
     <button class="ico" id="toSettings" type="button" title="Settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
-    <button class="ico" id="close" type="button" title="Close" aria-label="Close">
+    <button class="ico pc-only" id="close" type="button" title="Close" aria-label="Close">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </header>
 
@@ -237,8 +244,9 @@ input:focus, select:focus { border-color: #5b6370; }
         <h2>Behaviour</h2>
         <label class="field"><span>Let other devices use the light after</span>
           <select id="sRelease"><option value="15">15 seconds without use</option><option value="30">30 seconds without use</option><option value="60">1 minute without use</option><option value="300">5 minutes without use</option><option value="0">Never</option></select></label>
-        <label class="check"><input type="checkbox" id="sStartup"> Start with Windows</label>
-        <label class="check"><input type="checkbox" id="sRestore"> Turn the light on with the last look when Windows starts</label>
+        <label class="check pc-only"><input type="checkbox" id="sStartup"> Start with Windows</label>
+        <label class="check pc-only"><input type="checkbox" id="sRestore"> Turn the light on with the last look when Windows starts</label>
+        <p class="android-only">For one-tap switching, add the Ceiling light widget to your home screen, or the Ceiling light tile to Quick Settings (pull down twice, then the pencil icon).</p>
       </div>
 
       <div class="actions">
@@ -432,7 +440,8 @@ $('choices').addEventListener('click', (e) => { const b = e.target.closest('[dat
 function onHostMessage(m) {
   switch (m.type) {
     case 'init':
-      Object.assign(S, m); renderChips(); render(); renderStatus(); renderScenes();
+      Object.assign(S, m);
+      document.documentElement.classList.toggle('android', m.platform === 'android'); renderChips(); render(); renderStatus(); renderScenes();
       $('pin').setAttribute('aria-pressed', !!S.pinned);
       $('log').textContent = (m.log || []).slice().reverse().join('\n');
       if (m.view) showView(m.view); else fit();
@@ -460,6 +469,11 @@ function onHostMessage(m) {
       showChoices(m.devices.map((d) => ({ label: (d.likely ? 'Likely EGLO light' : (d.name || 'Unnamed device')), meta: `${d.mac}, ${d.rssi} dBm`, pick: () => { $('sMac').value = d.mac; note('importMsg', `Address ${d.mac} selected. Save to use it.`); } })));
       break;
     case 'toast': toast(m.text); break;
+    case 'back': // phone back button
+      if (!$('saveRow').hidden) { $('saveRow').hidden = true; fit(); }
+      else if (!$('viewSettings').hidden) showView('light');
+      else send({ cmd: 'exit' });
+      break;
   }
 }
 if (host) host.addEventListener('message', (e) => onHostMessage(e.data));

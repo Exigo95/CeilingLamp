@@ -1,0 +1,40 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+    paths: ['windows/**', '.github/workflows/windows-app.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build single-file exe
+        run: >
+          dotnet publish windows/CeilingLamp.Tray/CeilingLamp.Tray.csproj -c Release -r win-x64
+          --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true -o out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CeilingLamp-windows
+          path: out/CeilingLamp.exe
+
+      - name: Publish to the "Windows app" release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete pc-app --yes --cleanup-tag 2>$null
+          $notes = "Download CeilingLamp.exe and run it. It lives in the system tray (bottom right).`n`nBuilt from commit $env:GITHUB_SHA."
+          gh release create pc-app out/CeilingLamp.exe --title "Ceiling Light for Windows" --notes $notes --target $env:GITHUB_SHA --latest
