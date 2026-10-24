@@ -525,13 +525,13 @@ const CLOUD = {
   bases: ['https://l4hparse-hc-prod.awox.cloud/parse/', 'https://l4hparse-prod.awox.cloud/parse/'],
 };
 async function parsePost(base, path, body, session) {
-  const headers = { 'content-type': 'text/plain', 'x-parse-application-id': CLOUD.appId };
-  // Parse accepts credentials inside the body too, which keeps this a "simple" CORS request.
-  const payload = Object.assign({}, body, { _ApplicationId: CLOUD.appId, _ClientKey: CLOUD.clientKey, _InstallationId: installId() }, session ? { _SessionToken: session } : {});
-  delete headers['x-parse-application-id'];
-  const r = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify(payload) });
+  // The AwoX server rejects keys sent in the body; they must go in headers (CORS is allowed).
+  const headers = { 'content-type': 'application/json', 'x-parse-application-id': CLOUD.appId,
+    'x-parse-client-key': CLOUD.clientKey, 'x-parse-installation-id': installId() };
+  if (session) headers['x-parse-session-token'] = session;
+  const r = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+  if (!r.ok) { const e = new Error(j.error || 'HTTP ' + r.status); e.code = j.code; throw e; }
   return j;
 }
 function installId() { let id = store.get('install', null); if (!id) { id = crypto.randomUUID(); store.set('install', id); } return id; }
@@ -562,7 +562,8 @@ $('cloudImport').onclick = async () => {
   msg.className = 'msg err';
   msg.textContent = lastErr instanceof TypeError
     ? 'The EGLO server could not be reached from this page. Enter the mesh name, password and ID by hand (see the setup guide), then tap Save.'
-    : 'Import failed: ' + (lastErr?.message || 'unknown error') + '. Check the email and password.';
+    : lastErr?.code === 101 ? 'The EGLO server did not accept this email and password. Use the login of the AwoX HomeControl / EGLO app.'
+    : 'Import failed: ' + (lastErr?.message || 'unknown error') + '.';
 };
 $('cloudDevices').onclick = (e) => { const b = e.target.closest('[data-id]'); if (!b) return; $('sMeshId').value = b.dataset.id; $('sName').value = b.dataset.name; saveConn(false); };
 

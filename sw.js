@@ -1,5 +1,5 @@
 // Offline cache: the app opens instantly, even without internet. Bump VERSION after editing files.
-const VERSION = 'ceiling-light-v1';
+const VERSION = 'ceiling-light-v2';
 const FILES = ['./', 'index.html', 'protocol.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
