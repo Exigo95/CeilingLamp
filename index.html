@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ceiling Light</title>
+<meta name="theme-color" content="#101318">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+/* Layout: one-column phone remote. Live lamp preview on top, a card per light zone, scenes, settings sheet. */
+:root {
+  --bg: #f3f4f6; --surface: #ffffff; --surface-2: #e9ebef; --line: #d7dbe2;
+  --fg: #171a1f; --muted: #5d6573; --danger: #b42318; --ok: #1f7a4d;
+  --front: #ffd9a8; --back: #7a5cff;
+  --ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --num: ui-monospace, "SF Mono", "Roboto Mono", monospace;
+  --r: 18px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #0e1116; --surface: #171b22; --surface-2: #222833; --line: #2c3340; --fg: #eef0f4; --muted: #98a1b0; --danger: #ff8a7a; --ok: #6fd3a0; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #0e1116; --surface: #171b22; --surface-2: #222833; --line: #2c3340; --fg: #eef0f4; --muted: #98a1b0; --danger: #ff8a7a; --ok: #6fd3a0; color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 var(--ui); -webkit-tap-highlight-color: transparent; }
+body { padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+main { max-width: 520px; margin: 0 auto; display: grid; gap: 14px; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; }
+h1 { margin: 0; font-size: 22px; font-weight: 750; letter-spacing: -0.02em; text-wrap: balance; }
+.icon-btn { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); display: grid; place-items: center; }
+.icon-btn svg { width: 20px; height: 20px; }
+
+.conn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 14px 7px 11px; font-size: 13px; font-weight: 600; }
+.conn i { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.conn[data-state="connected"] i { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent); }
+.conn[data-state="connecting"] i { background: #e0a100; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+
+/* Lamp preview: back light halo behind, front panel on top */
+.stage { position: relative; height: 210px; border-radius: 24px; background: #0b0d11; overflow: hidden; display: grid; place-items: center; }
+.halo { position: absolute; width: 330px; height: 330px; border-radius: 50%; background: radial-gradient(circle, var(--back) 0%, color-mix(in srgb, var(--back) 45%, transparent) 38%, transparent 68%); transition: opacity .25s, background .25s; }
+.disc { position: relative; width: 150px; height: 150px; border-radius: 50%; background: radial-gradient(circle at 50% 45%, color-mix(in srgb, #fff 55%, var(--front)) 0%, var(--front) 62%, color-mix(in srgb, var(--front) 80%, #000) 100%); box-shadow: 0 0 40px color-mix(in srgb, var(--front) 70%, transparent); border: 3px solid #2a2f38; transition: filter .25s, background .25s, box-shadow .25s; }
+.disc.off { background: #1e222a; box-shadow: none; }
+.stage .power { position: absolute; right: 14px; bottom: 14px; }
+.power { width: 58px; height: 58px; border-radius: 50%; border: 0; background: #f4f5f7; color: #0b0d11; display: grid; place-items: center; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.power[aria-pressed="false"] { background: #2a2f38; color: #c8ced8; }
+.power svg { width: 26px; height: 26px; }
+.stage .note { position: absolute; left: 16px; bottom: 14px; color: #aab2bf; font-size: 12px; max-width: 55%; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 14px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.card-head small { display: block; color: var(--muted); font-size: 12px; font-weight: 500; }
+
+.switch { position: relative; width: 54px; height: 32px; border-radius: 999px; border: 0; background: var(--surface-2); flex: none; transition: background .2s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .2s; }
+.switch[aria-checked="true"] { background: var(--fg); }
+.switch[aria-checked="true"]::after { transform: translateX(22px); }
+
+.row { display: grid; gap: 6px; }
+.row label { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); font-weight: 600; }
+.row output { font-family: var(--num); font-variant-numeric: tabular-nums; color: var(--fg); }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 34px; border-radius: 12px; background: var(--track, var(--surface-2)); margin: 0; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 3px solid rgba(0,0,0,.18); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 3px solid rgba(0,0,0,.18); }
+.t-bright { --track: linear-gradient(90deg, #2b2f36, #f2f2ee); }
+.t-temp { --track: linear-gradient(90deg, #ffb46b, #ffe9cf 45%, #e6efff); }
+.t-hue { --track: linear-gradient(90deg, #f00, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00); }
+.t-sat { --track: linear-gradient(90deg, #fff, var(--back-pure, #7a5cff)); }
+.zone.off .row, .zone.off .chips { opacity: .45; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { border: 1px solid var(--line); background: var(--surface-2); border-radius: 999px; padding: 7px 12px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px; }
+.chip i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); }
+
+.scenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+.scene { position: relative; border: 1px solid var(--line); background: var(--surface-2); border-radius: 14px; padding: 12px; text-align: left; display: grid; gap: 8px; min-height: 76px; }
+.scene b { font-size: 14px; }
+.scene .sw { display: flex; gap: 4px; }
+.scene .sw i { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); }
+.scene .del { position: absolute; top: 6px; right: 6px; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 4px; }
+.scene.add { border-style: dashed; color: var(--muted); place-content: center; text-align: center; }
+
+.btn { border: 0; border-radius: 12px; padding: 12px 16px; font-weight: 700; background: var(--fg); color: var(--bg); }
+.btn.secondary { background: var(--surface-2); color: var(--fg); border: 1px solid var(--line); }
+.btn.small { padding: 8px 12px; font-size: 13px; }
+.btn:disabled { opacity: .5; }
+
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; font-weight: 600; max-width: calc(100% - 32px); z-index: 30; box-shadow: 0 6px 24px rgba(0,0,0,.3); }
+
+/* Settings sheet */
+dialog { border: 0; padding: 0; width: min(560px, 100%); max-height: 92vh; margin: auto auto 0; border-radius: 22px 22px 0 0; background: var(--bg); color: var(--fg); }
+dialog::backdrop { background: rgba(0,0,0,.5); }
+.sheet { padding: 18px max(16px, env(safe-area-inset-left, 0px)) calc(22px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 14px; }
+.sheet h2 { margin: 0; font-size: 19px; }
+.sheet h3 { margin: 0; font-size: 14px; }
+.sheet p { margin: 0; color: var(--muted); font-size: 13px; }
+.field { display: grid; gap: 5px; }
+.field span { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.field input, .field select { width: 100%; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 11px 12px; min-width: 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.list { display: grid; gap: 6px; }
+.list button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 8px; }
+.list button span:last-child { font-family: var(--num); color: var(--muted); font-size: 12px; }
+.msg { font-size: 13px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.msg.err { color: var(--danger); }
+.warn { border: 1px solid var(--line); background: var(--surface); }
+code { font-family: var(--num); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div style="display:grid;gap:6px;min-width:0">
+      <h1 id="title">Ceiling light</h1>
+      <button class="conn" id="conn" data-state="idle" type="button"><i></i><span id="connText">Tap to connect</span></button>
+    </div>
+    <button class="icon-btn" id="openSettings" type="button" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <div class="msg warn" id="setupHint" hidden>
+    <b>First-time setup needed.</b> Open settings to import your light from your EGLO account. It takes about a minute.
+    <div class="actions" style="margin-top:10px"><button class="btn small" id="hintSetup" type="button">Set up</button></div>
+  </div>
+  <div class="msg err" id="noBt" hidden>This browser can't use Bluetooth. Open the app in <b>Chrome on Android</b> (or Chrome/Edge on a computer).</div>
+
+  <section class="stage" aria-label="Light preview">
+    <div class="halo" id="halo"></div>
+    <div class="disc" id="disc"></div>
+    <span class="note" id="stageNote">Front 4000 K · Back violet</span>
+    <button class="power" id="power" type="button" aria-pressed="true" aria-label="Whole light on or off">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.4 6.9a8 8 0 1 0 11.2 0"/></svg>
+    </button>
+  </section>
+
+  <section class="card zone" id="frontCard">
+    <div class="card-head">
+      <div><h2>Front light</h2><small>White · 2700–6500 K</small></div>
+      <button class="switch" id="frontOn" role="switch" aria-checked="true" aria-label="Front light on"></button>
+    </div>
+    <div class="row"><label for="frontBri">Brightness <output id="frontBriOut">80 %</output></label>
+      <input type="range" id="frontBri" class="t-bright" min="1" max="100" value="80"></div>
+    <div class="row"><label for="frontTemp">Warmth <output id="frontTempOut">4000 K</output></label>
+      <input type="range" id="frontTemp" class="t-temp" min="2700" max="6500" step="50" value="4000"></div>
+    <div class="chips" id="tempChips"></div>
+  </section>
+
+  <section class="card zone" id="backCard">
+    <div class="card-head">
+      <div><h2>Back light</h2><small>Colour · full RGB</small></div>
+      <button class="switch" id="backOn" role="switch" aria-checked="true" aria-label="Back light on"></button>
+    </div>
+    <div class="row"><label for="backBri">Brightness <output id="backBriOut">60 %</output></label>
+      <input type="range" id="backBri" class="t-bright" min="1" max="100" value="60"></div>
+    <div class="row"><label for="backHue">Colour <output id="backHueOut">260°</output></label>
+      <input type="range" id="backHue" class="t-hue" min="0" max="359" value="260"></div>
+    <div class="row"><label for="backSat">Saturation <output id="backSatOut">80 %</output></label>
+      <input type="range" id="backSat" class="t-sat" min="0" max="100" value="80"></div>
+    <div class="chips" id="colorChips"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><h2>Scenes</h2><small>Tap to apply · save the current look as your own</small></div></div>
+    <div class="scenes" id="scenes"></div>
+  </section>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<dialog id="settings">
+  <div class="sheet">
+    <div class="card-head"><h2>Settings</h2><button class="btn small secondary" id="closeSettings" type="button">Done</button></div>
+
+    <div class="card">
+      <h3>1 · Import from your EGLO account</h3>
+      <p>Uses the same email and password as the AwoX HomeControl / EGLO app. Your password is used once to fetch the light's Bluetooth key and is not stored.</p>
+      <label class="field"><span>Email</span><input id="cloudEmail" type="email" autocomplete="username"></label>
+      <label class="field"><span>Password</span><input id="cloudPass" type="password" autocomplete="current-password"></label>
+      <div class="actions"><button class="btn" id="cloudImport" type="button">Import</button></div>
+      <div class="msg" id="cloudMsg" hidden></div>
+      <div class="list" id="cloudDevices"></div>
+    </div>
+
+    <div class="card">
+      <h3>2 · Connection details</h3>
+      <p>Filled in by the import. You can also enter them by hand.</p>
+      <label class="field"><span>Light name</span><input id="sName" type="text" maxlength="40"></label>
+      <div class="grid2">
+        <label class="field"><span>Mesh name</span><input id="sMesh" type="text" maxlength="16" autocomplete="off"></label>
+        <label class="field"><span>Mesh password</span><input id="sMeshPass" type="text" maxlength="16" autocomplete="off"></label>
+      </div>
+      <div class="grid2">
+        <label class="field"><span>Mesh ID</span><input id="sMeshId" type="number" min="1" max="65535" inputmode="numeric"></label>
+        <div class="field"><span>Find ID</span><button class="btn secondary" id="discover" type="button">Scan mesh</button></div>
+      </div>
+      <div class="list" id="discovered"></div>
+      <div class="actions"><button class="btn" id="saveConn" type="button">Save</button></div>
+    </div>
+
+    <div class="card">
+      <h3>3 · Front and back zones</h3>
+      <p>EGLO dual-zone lights use zone 1 for white and zone 3 for colour. Use Blink to check which part of your light responds.</p>
+      <div class="grid2">
+        <label class="field"><span>Front (white)</span><select id="epFront"><option>1</option><option>2</option><option>3</option></select></label>
+        <label class="field"><span>Back (colour)</span><select id="epBack"><option>1</option><option>2</option><option selected>3</option></select></label>
+      </div>
+      <div class="actions">
+        <button class="btn secondary small" id="blinkFront" type="button">Blink front</button>
+        <button class="btn secondary small" id="blinkBack" type="button">Blink back</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Appearance</h3>
+      <div class="actions" id="themeBtns">
+        <button class="btn secondary small" data-theme-set="system" type="button">System</button>
+        <button class="btn secondary small" data-theme-set="light" type="button">Light</button>
+        <button class="btn secondary small" data-theme-set="dark" type="button">Dark</button>
+      </div>
+    </div>
+
+    <details class="card">
+      <summary><b>Troubleshooting</b></summary>
+      <p style="margin-top:10px">If connecting fails, close the EGLO/AwoX app completely: a light accepts only one Bluetooth connection at a time. Stay within a few metres of the light. Turn on Location on Android if Chrome asks for it.</p>
+      <div class="msg" id="log" style="font-family:var(--num);font-size:11px;white-space:pre-wrap;max-height:180px;overflow:auto;margin-top:10px"></div>
+      <div class="actions" style="margin-top:10px"><button class="btn secondary small" id="forget" type="button">Forget all settings</button></div>
+    </details>
+  </div>
+</dialog>
+
+<script src="protocol.js"></script>
+<script>
+'use strict';
+const P = window.EgloProtocol;
+const $ = (id) => document.getElementById(id);
+
+// ---------- persisted state ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('eglo.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('eglo.' + k, JSON.stringify(v)); } catch {} },
+};
+const DEFAULT_STATE = { front: { on: true, bri: 80, kelvin: 4000 }, back: { on: true, bri: 60, hue: 260, sat: 80 } };
+let cfg = Object.assign({ name: 'Ceiling light', mesh: '', pass: '', meshId: null, epFront: 1, epBack: 3, theme: 'system' }, store.get('cfg', {}));
+let state = Object.assign(structuredClone(DEFAULT_STATE), store.get('state', {}));
+const BUILTIN_SCENES = [
+  { name: 'Bright', builtin: true, front: { on: true, bri: 100, kelvin: 5000 }, back: { on: true, bri: 70, hue: 210, sat: 15 } },
+  { name: 'Cozy', builtin: true, front: { on: true, bri: 45, kelvin: 2700 }, back: { on: true, bri: 50, hue: 28, sat: 85 } },
+  { name: 'Reading', builtin: true, front: { on: true, bri: 85, kelvin: 4000 }, back: { on: false, bri: 40, hue: 30, sat: 50 } },
+  { name: 'Movie', builtin: true, front: { on: false, bri: 20, kelvin: 2700 }, back: { on: true, bri: 35, hue: 235, sat: 90 } },
+  { name: 'Night', builtin: true, front: { on: false, bri: 5, kelvin: 2700 }, back: { on: true, bri: 8, hue: 15, sat: 95 } },
+];
+let customScenes = store.get('scenes', []);
+
+// ---------- colour helpers ----------
+function hsvToRgb(h, s, v) {
+  const f = (n) => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return [f(5), f(3), f(1)].map((x) => Math.round(x * 255));
+}
+const rgbCss = (a) => `rgb(${a.join(',')})`;
+function kelvinToRgb(k) { // Tanner Helland approximation
+  const t = k / 100; let r, g, b;
+  r = t <= 66 ? 255 : 329.7 * Math.pow(t - 60, -0.1332);
+  g = t <= 66 ? 99.47 * Math.log(t) - 161.12 : 288.12 * Math.pow(t - 60, -0.0755);
+  b = t >= 66 ? 255 : t <= 19 ? 0 : 138.52 * Math.log(t - 10) - 305.04;
+  return [r, g, b].map((x) => Math.max(0, Math.min(255, Math.round(x))));
+}
+const HUE_NAMES = [[15,'red'],[40,'orange'],[65,'yellow'],[150,'green'],[195,'cyan'],[250,'blue'],[290,'violet'],[335,'pink'],[360,'red']];
+const hueName = (h, s) => s < 20 ? 'white' : HUE_NAMES.find(([lim]) => h < lim)[1];
+
+// ---------- rendering ----------
+function render() {
+  const f = state.front, b = state.back;
+  $('title').textContent = cfg.name || 'Ceiling light';
+  document.title = cfg.name || 'Ceiling Light';
+  $('frontOn').setAttribute('aria-checked', f.on); $('backOn').setAttribute('aria-checked', b.on);
+  $('frontCard').classList.toggle('off', !f.on); $('backCard').classList.toggle('off', !b.on);
+  $('frontBri').value = f.bri; $('frontBriOut').textContent = f.bri + ' %';
+  $('frontTemp').value = f.kelvin; $('frontTempOut').textContent = f.kelvin + ' K';
+  $('backBri').value = b.bri; $('backBriOut').textContent = b.bri + ' %';
+  $('backHue').value = b.hue; $('backHueOut').textContent = b.hue + '°';
+  $('backSat').value = b.sat; $('backSatOut').textContent = b.sat + ' %';
+  const root = document.documentElement.style;
+  root.setProperty('--front', rgbCss(kelvinToRgb(f.kelvin)));
+  root.setProperty('--back', rgbCss(hsvToRgb(b.hue, b.sat / 100, 1)));
+  root.setProperty('--back-pure', rgbCss(hsvToRgb(b.hue, 1, 1)));
+  const disc = $('disc'), halo = $('halo');
+  disc.classList.toggle('off', !f.on);
+  disc.style.filter = f.on ? `brightness(${0.7 + f.bri / 330})` : '';
+  halo.style.opacity = b.on ? (0.25 + b.bri / 133).toFixed(2) : 0;
+  $('power').setAttribute('aria-pressed', f.on || b.on);
+  $('stageNote').textContent = (f.on ? `Front ${f.kelvin} K · ${f.bri} %` : 'Front off') + '\n' + (b.on ? `Back ${hueName(b.hue, b.sat)} · ${b.bri} %` : 'Back off');
+  $('stageNote').style.whiteSpace = 'pre-line';
+  store.set('state', state);
+}
+
+function renderChips() {
+  const temps = [[2700, 'Warm'], [3500, 'Soft'], [4000, 'Neutral'], [5000, 'Cool'], [6500, 'Daylight']];
+  $('tempChips').innerHTML = temps.map(([k, n]) => `<button class="chip" type="button" data-k="${k}"><i style="background:${rgbCss(kelvinToRgb(k))}"></i>${n}</button>`).join('');
+  const cols = [[0, 100, 'Red'], [28, 90, 'Amber'], [55, 90, 'Gold'], [130, 85, 'Green'], [190, 85, 'Teal'], [230, 90, 'Blue'], [275, 80, 'Violet'], [320, 70, 'Pink'], [30, 10, 'White']];
+  $('colorChips').innerHTML = cols.map(([h, s, n]) => `<button class="chip" type="button" data-h="${h}" data-s="${s}"><i style="background:${rgbCss(hsvToRgb(h, s / 100, 1))}"></i>${n}</button>`).join('');
+}
+
+function renderScenes() {
+  const all = [...BUILTIN_SCENES, ...customScenes];
+  const sw = (sc) => `<span class="sw"><i style="background:${sc.front.on ? rgbCss(kelvinToRgb(sc.front.kelvin)) : '#333'}"></i><i style="background:${sc.back.on ? rgbCss(hsvToRgb(sc.back.hue, sc.back.sat / 100, 1)) : '#333'}"></i></span>`;
+  $('scenes').innerHTML = all.map((sc, i) => `<button class="scene" type="button" data-i="${i}"><b>${escapeHtml(sc.name)}</b>${sw(sc)}${sc.builtin ? '' : `<span class="del" data-del="${i - BUILTIN_SCENES.length}" role="button" aria-label="Delete ${escapeHtml(sc.name)}">×</span>`}</button>`).join('')
+    + `<button class="scene add" type="button" id="addScene">＋ Save current</button>`;
+}
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let toastTimer;
+function toast(text, ms = 2600) { const t = $('toast'); t.textContent = text; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms); }
+function log(...a) { const l = $('log'); l.textContent = (new Date().toLocaleTimeString() + ' ' + a.join(' ') + '\n' + l.textContent).slice(0, 4000); console.log(...a); }
+
+// ---------- Bluetooth link ----------
+const link = { device: null, server: null, pair: null, cmd: null, status: null, key: null, connecting: null };
+function setConn(s, text) { $('conn').dataset.state = s; $('connText').textContent = text; }
+const configured = () => cfg.mesh && cfg.pass && cfg.meshId;
+
+async function pickDevice() {
+  link.device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: [P.SERVICE] });
+  link.device.addEventListener('gattserverdisconnected', onDisconnect);
+  store.set('deviceId', link.device.id);
+}
+async function rememberedDevice() {
+  if (!navigator.bluetooth.getDevices) return null;
+  try {
+    const id = store.get('deviceId', null);
+    const list = await navigator.bluetooth.getDevices();
+    const d = list.find((x) => x.id === id) || null;
+    if (d && !d._listening) { d.addEventListener('gattserverdisconnected', onDisconnect); d._listening = true; }
+    return d;
+  } catch { return null; }
+}
+function onDisconnect() { link.key = null; link.server = null; setConn('idle', 'Disconnected · tap to reconnect'); log('disconnected'); }
+
+function withTimeout(p, ms, what) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out')), ms))]); }
+
+async function connect(interactive) {
+  if (link.key && link.server?.connected) return true;
+  if (link.connecting) return link.connecting;
+  link.connecting = (async () => {
+    if (!navigator.bluetooth) { $('noBt').hidden = false; return false; }
+    if (!configured()) { openSettings(); toast('Finish setup first'); return false; }
+    setConn('connecting', 'Connecting…');
+    try {
+      if (!link.device) link.device = await rememberedDevice();
+      if (!link.device) { if (!interactive) throw new Error('Tap to choose your light'); await pickDevice(); }
+      let server;
+      try { server = await withTimeout(link.device.gatt.connect(), 10000, 'Connect'); }
+      catch (e) { if (!interactive) throw e; await pickDevice(); server = await withTimeout(link.device.gatt.connect(), 10000, 'Connect'); }
+      const svc = await server.getPrimaryService(P.SERVICE);
+      const [pair, cmd, status] = await Promise.all([P.PAIR_CHAR, P.COMMAND_CHAR, P.STATUS_CHAR].map((u) => svc.getCharacteristic(u)));
+      const rnd = crypto.getRandomValues(new Uint8Array(8));
+      await pair.writeValueWithResponse(P.makePairPacket(cfg.mesh, cfg.pass, rnd));
+      const reply = new Uint8Array((await pair.readValue()).buffer);
+      log('login reply', P.hex(reply));
+      if (reply[0] === 0x0e) throw new Error('The light rejected the mesh name or password');
+      if (reply[0] !== 0x0d || reply.length < 9) throw new Error('Unexpected login reply ' + P.hex(reply.slice(0, 4)));
+      Object.assign(link, { server, pair, cmd, status, key: P.makeSessionKey(cfg.mesh, cfg.pass, rnd, reply.slice(1, 9)) });
+      setConn('connected', 'Connected');
+      return true;
+    } catch (e) {
+      log('connect failed:', e.message);
+      const cancelled = e.name === 'NotFoundError';
+      setConn('idle', cancelled ? 'Tap to connect' : 'Not connected · tap to retry');
+      if (!cancelled && interactive) toast(e.message.includes('rejected') ? e.message + '. Re-run the import in settings.' : 'Could not connect: ' + e.message, 4200);
+      return false;
+    } finally { link.connecting = null; }
+  })();
+  return link.connecting;
+}
+
+async function writeRaw(packet) {
+  const c = link.cmd;
+  if (c.writeValueWithoutResponse) await c.writeValueWithoutResponse(packet); else await c.writeValue(packet);
+}
+
+// Coalescing command queue: rapid slider moves only send the newest value per channel.
+const pending = new Map();
+let pumping = false;
+function send(channel, command) { pending.set(channel, command); pump(); }
+async function pump() {
+  if (pumping) return; pumping = true;
+  try {
+    while (pending.size) {
+      if (!(await connect(true))) { pending.clear(); break; }
+      const [ch, command] = pending.entries().next().value; pending.delete(ch);
+      try { await writeRaw(P.makeCommandPacket(link.key, cfg.meshId, command)); }
+      catch (e) { log('write failed', e.message); link.key = null; pending.set(ch, command); if (!(await connect(false))) { pending.clear(); break; } }
+      await new Promise((r) => setTimeout(r, 45));
+    }
+  } finally { pumping = false; }
+}
+
+// ---------- applying state to the lamp ----------
+const Z = P.zcl;
+function sendFront(what) {
+  const f = state.front, ep = +cfg.epFront;
+  if (what === 'power') return send('f.power', f.on ? Z.level(ep, P.percentToLevel(f.bri)) : Z.off(ep));
+  if (!f.on) return;
+  if (what === 'bri') send('f.bri', Z.level(ep, P.percentToLevel(f.bri)));
+  if (what === 'temp') send('f.temp', Z.colorTemp(ep, P.kelvinToMireds(f.kelvin)));
+}
+function sendBack(what) {
+  const b = state.back, ep = +cfg.epBack;
+  if (what === 'power') return send('b.power', b.on ? Z.level(ep, P.percentToLevel(b.bri)) : Z.off(ep));
+  if (!b.on) return;
+  if (what === 'bri') send('b.bri', Z.level(ep, P.percentToLevel(b.bri)));
+  if (what === 'color') send('b.color', Z.hueSat(ep, Math.round(b.hue / 360 * 254), Math.round(b.sat * 2.54)));
+}
+function applyAll() {
+  sendFront('power'); if (state.front.on) sendFront('temp');
+  sendBack('power'); if (state.back.on) sendBack('color');
+}
+
+// ---------- wiring ----------
+function bindRange(id, update, sender) {
+  const el = $(id);
+  el.addEventListener('input', () => { update(+el.value); render(); sender(); });
+}
+bindRange('frontBri', (v) => { state.front.bri = v; state.front.on = true; }, () => sendFront('bri'));
+bindRange('frontTemp', (v) => { state.front.kelvin = v; }, () => sendFront('temp'));
+bindRange('backBri', (v) => { state.back.bri = v; state.back.on = true; }, () => sendBack('bri'));
+bindRange('backHue', (v) => { state.back.hue = v; }, () => sendBack('color'));
+bindRange('backSat', (v) => { state.back.sat = v; }, () => sendBack('color'));
+
+$('frontOn').onclick = () => { state.front.on = !state.front.on; render(); sendFront('power'); if (state.front.on) sendFront('temp'); };
+$('backOn').onclick = () => { state.back.on = !state.back.on; render(); sendBack('power'); if (state.back.on) sendBack('color'); };
+$('power').onclick = () => {
+  const anyOn = state.front.on || state.back.on;
+  state.front.on = state.back.on = !anyOn; render(); applyAll();
+};
+$('tempChips').onclick = (e) => { const b = e.target.closest('[data-k]'); if (!b) return; state.front.kelvin = +b.dataset.k; state.front.on = true; render(); sendFront('power'); sendFront('temp'); };
+$('colorChips').onclick = (e) => { const b = e.target.closest('[data-h]'); if (!b) return; Object.assign(state.back, { hue: +b.dataset.h, sat: +b.dataset.s, on: true }); render(); sendBack('power'); sendBack('color'); };
+
+$('scenes').onclick = (e) => {
+  const del = e.target.closest('[data-del]');
+  if (del) { e.stopPropagation(); const i = +del.dataset.del; const n = customScenes[i].name; customScenes.splice(i, 1); store.set('scenes', customScenes); renderScenes(); toast(`Deleted “${n}”`); return; }
+  if (e.target.closest('#addScene')) {
+    const name = `My scene ${customScenes.length + 1}`;
+    customScenes.push({ name, front: { ...state.front }, back: { ...state.back } });
+    store.set('scenes', customScenes); renderScenes(); toast(`Saved as “${name}”`); return;
+  }
+  const b = e.target.closest('[data-i]'); if (!b) return;
+  const sc = [...BUILTIN_SCENES, ...customScenes][+b.dataset.i];
+  state.front = { ...sc.front }; state.back = { ...sc.back }; render(); applyAll(); toast(sc.name);
+};
+
+$('conn').onclick = () => connect(true);
+
+// ---------- settings ----------
+const dlg = $('settings');
+function openSettings() {
+  $('sName').value = cfg.name; $('sMesh').value = cfg.mesh; $('sMeshPass').value = cfg.pass;
+  $('sMeshId').value = cfg.meshId || ''; $('epFront').value = cfg.epFront; $('epBack').value = cfg.epBack;
+  if (!dlg.open) dlg.showModal();
+}
+$('openSettings').onclick = openSettings; $('hintSetup').onclick = openSettings;
+$('closeSettings').onclick = () => { saveConn(true); dlg.close(); };
+function saveConn(quiet) {
+  const changedCreds = $('sMesh').value !== cfg.mesh || $('sMeshPass').value !== cfg.pass;
+  cfg.name = $('sName').value.trim() || 'Ceiling light';
+  cfg.mesh = $('sMesh').value; cfg.pass = $('sMeshPass').value;
+  cfg.meshId = +$('sMeshId').value || null;
+  cfg.epFront = +$('epFront').value; cfg.epBack = +$('epBack').value;
+  store.set('cfg', cfg); render(); $('setupHint').hidden = !!configured();
+  if (changedCreds) link.key = null;
+  if (!quiet) toast('Saved');
+}
+$('saveConn').onclick = () => saveConn(false);
+$('epFront').onchange = $('epBack').onchange = () => saveConn(true);
+
+async function blink(ep) {
+  saveConn(true);
+  for (let i = 0; i < 2; i++) {
+    send('blink', Z.off(ep)); await new Promise((r) => setTimeout(r, 600));
+    send('blink', Z.on(ep)); await new Promise((r) => setTimeout(r, 600));
+  }
+  applyAll(); // restore the look you had before the test
+}
+$('blinkFront').onclick = () => blink(+$('epFront').value);
+$('blinkBack').onclick = () => blink(+$('epBack').value);
+
+// Mesh scan: ask every node for its status and list the mesh ids that answer.
+$('discover').onclick = async () => {
+  const keepId = cfg.meshId; saveConn(true);
+  if (!cfg.mesh || !cfg.pass) return toast('Enter mesh name and password first');
+  cfg.meshId = cfg.meshId || 1; // connect() needs a value; restored below
+  const out = $('discovered'); out.innerHTML = '<div class="msg">Scanning…</div>';
+  try {
+    if (!(await connect(true))) { out.innerHTML = ''; return; }
+    const ids = new Map();
+    for (let round = 0; round < 3; round++) {
+      await writeRaw(P.makeStatusPoll(link.key));
+      for (let i = 0; i < 8; i++) {
+        const v = new Uint8Array((await link.status.readValue()).buffer);
+        const st = P.parseStatus(link.key, v);
+        if (st && st.meshId) { ids.set(st.meshId, (ids.get(st.meshId) || 0) + 1); log('status from', st.meshId, P.hex(st.block)); }
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    }
+    cfg.meshId = keepId;
+    if (!ids.size) { out.innerHTML = '<div class="msg">No answer. Use the account import, or enter the mesh ID by hand.</div>'; return; }
+    out.innerHTML = [...ids.keys()].map((id) => `<button type="button" data-id="${id}"><span>Light found</span><span>ID ${id}</span></button>`).join('');
+  } catch (e) { cfg.meshId = keepId; out.innerHTML = `<div class="msg err">Scan failed: ${escapeHtml(e.message)}</div>`; }
+};
+$('discovered').onclick = (e) => { const b = e.target.closest('[data-id]'); if (!b) return; $('sMeshId').value = b.dataset.id; saveConn(false); };
+
+// AwoX / EGLO cloud import (Parse server used by the official app).
+const CLOUD = {
+  appId: '55O69FLtoxPt67LLwaHGpHmVWndhZGn9Wty8PLrJ', clientKey: 'PyR3yV65rytEicteNlQHSVNpAGvCByOrsLiEqJtI',
+  bases: ['https://l4hparse-hc-prod.awox.cloud/parse/', 'https://l4hparse-prod.awox.cloud/parse/'],
+};
+async function parsePost(base, path, body, session) {
+  const headers = { 'content-type': 'text/plain', 'x-parse-application-id': CLOUD.appId };
+  // Parse accepts credentials inside the body too, which keeps this a "simple" CORS request.
+  const payload = Object.assign({}, body, { _ApplicationId: CLOUD.appId, _ClientKey: CLOUD.clientKey, _InstallationId: installId() }, session ? { _SessionToken: session } : {});
+  delete headers['x-parse-application-id'];
+  const r = await fetch(base + path, { method: 'POST', headers, body: JSON.stringify(payload) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+  return j;
+}
+function installId() { let id = store.get('install', null); if (!id) { id = crypto.randomUUID(); store.set('install', id); } return id; }
+$('cloudImport').onclick = async () => {
+  const email = $('cloudEmail').value.trim(), pass = $('cloudPass').value;
+  const msg = $('cloudMsg'), list = $('cloudDevices');
+  if (!email || !pass) { msg.hidden = false; msg.className = 'msg err'; msg.textContent = 'Enter the email and password of your EGLO app account.'; return; }
+  msg.hidden = false; msg.className = 'msg'; msg.textContent = 'Signing in…'; list.innerHTML = '';
+  let lastErr;
+  for (const base of CLOUD.bases) {
+    try {
+      const login = await parsePost(base, 'login', { username: email, password: pass, _method: 'GET' });
+      const where = { where: { owner: { __type: 'Pointer', className: '_User', objectId: login.objectId } }, _method: 'GET' };
+      const [creds, devs] = await Promise.all([parsePost(base, 'classes/Credential', where, login.sessionToken), parsePost(base, 'classes/Device', where, login.sessionToken)]);
+      const zig = creds.results.find((c) => c.service === 'zigbee') || creds.results.find((c) => c.service === 'mesh');
+      if (!zig) throw new Error('No Bluetooth key found in this account');
+      $('sMesh').value = zig.client_id; $('sMeshPass').value = zig.access_token;
+      const lights = devs.results.filter((d) => d.address != null).map((d) => ({ name: (d.displayName || d.macAddress || 'Light').trim(), id: (+d.address + 65536) % 65536, type: d.type || '' }));
+      $('cloudPass').value = '';
+      saveConn(true);
+      if (!lights.length) { msg.textContent = 'Key imported, but no lights are listed in the account. Use Scan mesh below.'; return; }
+      msg.textContent = lights.length === 1 ? 'Imported. Your light is selected.' : 'Imported. Pick your ceiling light:';
+      list.innerHTML = lights.map((l) => `<button type="button" data-id="${l.id}" data-name="${escapeHtml(l.name)}"><span>${escapeHtml(l.name)}</span><span>ID ${l.id}</span></button>`).join('');
+      if (lights.length === 1) { $('sMeshId').value = lights[0].id; $('sName').value = lights[0].name; saveConn(true); }
+      return;
+    } catch (e) { lastErr = e; log('cloud', base, e.message); }
+  }
+  msg.className = 'msg err';
+  msg.textContent = lastErr instanceof TypeError
+    ? 'The EGLO server could not be reached from this page. Enter the mesh name, password and ID by hand (see the setup guide), then tap Save.'
+    : 'Import failed: ' + (lastErr?.message || 'unknown error') + '. Check the email and password.';
+};
+$('cloudDevices').onclick = (e) => { const b = e.target.closest('[data-id]'); if (!b) return; $('sMeshId').value = b.dataset.id; $('sName').value = b.dataset.name; saveConn(false); };
+
+$('forget').onclick = () => { try { Object.keys(localStorage).filter((k) => k.startsWith('eglo.')).forEach((k) => localStorage.removeItem(k)); } catch {} location.reload(); };
+
+// theme
+function applyTheme() {
+  if (cfg.theme === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = cfg.theme;
+  document.querySelectorAll('[data-theme-set]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.themeSet === cfg.theme));
+}
+$('themeBtns').onclick = (e) => { const b = e.target.closest('[data-theme-set]'); if (!b) return; cfg.theme = b.dataset.themeSet; store.set('cfg', cfg); applyTheme(); };
+
+// keep the link alive while the app is open (the light drops idle connections)
+setInterval(() => { if (link.key && link.server?.connected && !pumping && document.visibilityState === 'visible') writeRaw(P.makeStatusPoll(link.key)).catch(() => {}); }, 8000);
+
+// ---------- boot ----------
+applyTheme(); renderChips(); renderScenes(); render();
+if (!navigator.bluetooth) $('noBt').hidden = false;
+$('setupHint').hidden = !!configured();
+if (configured()) connect(false); // silently reconnect to a remembered light
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
