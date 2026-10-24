@@ -244,6 +244,13 @@ code { font-family: var(--num); font-size: 12px; }
     </div>
 
     <div class="card">
+      <h3>Sharing the light</h3>
+      <p>The light accepts one connection at a time. The app lets go of it when you haven't used it for a while, so your phone and PC can take turns. It reconnects by itself as soon as you use a control.</p>
+      <label class="field"><span>Release the light after</span>
+        <select id="releaseAfter"><option value="15">15 seconds</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="300">5 minutes</option><option value="0">Never</option></select></label>
+    </div>
+
+    <div class="card">
       <h3>Appearance</h3>
       <div class="actions" id="themeBtns">
         <button class="btn secondary small" data-theme-set="system" type="button">System</button>
@@ -264,7 +271,7 @@ code { font-family: var(--num); font-size: 12px; }
 <script src="protocol.js"></script>
 <script>
 'use strict';
-const APP_VERSION = '1.7'; // shown in the app; keep in step with VERSION in sw.js
+const APP_VERSION = '1.8'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -274,7 +281,7 @@ const store = {
   set(k, v) { try { localStorage.setItem('eglo.' + k, JSON.stringify(v)); } catch {} },
 };
 const DEFAULT_STATE = { front: { on: true, bri: 80, kelvin: 4000 }, back: { on: true, bri: 60, hue: 260, sat: 80 } };
-let cfg = Object.assign({ name: 'Ceiling light', mesh: '', pass: '', meshId: null, backId: null, epFront: 1, epBack: 3, theme: 'system' }, store.get('cfg', {}));
+let cfg = Object.assign({ name: 'Ceiling light', mesh: '', pass: '', meshId: null, backId: null, epFront: 1, epBack: 3, theme: 'system', releaseAfter: 30 }, store.get('cfg', {}));
 let state = Object.assign(structuredClone(DEFAULT_STATE), store.get('state', {}));
 const BUILTIN_SCENES = [
   { name: 'Bright', builtin: true, front: { on: true, bri: 100, kelvin: 5000 }, back: { on: true, bri: 70, hue: 210, sat: 15 } },
@@ -381,7 +388,24 @@ async function rememberedDevice() {
     return d;
   } catch { return null; }
 }
-function onDisconnect() { link.key = null; link.server = null; setConn('idle', 'Disconnected · tap to reconnect'); log('disconnected'); }
+function onDisconnect() {
+  link.key = null; link.server = null;
+  if (link.released) setConn('idle', 'Ready · connects when you use it');
+  else setConn('idle', 'Disconnected · tap to reconnect');
+  log(link.released ? 'released the light' : 'disconnected');
+}
+// Let go of the light after a quiet period so another phone or PC can use it.
+let lastActivity = Date.now();
+function releaseLight() {
+  if (!link.server?.connected || pumping || pending.size) return;
+  link.released = true; link.key = null;
+  try { link.device.gatt.disconnect(); } catch {}
+  onDisconnect();
+}
+function idleCheck() {
+  const after = +cfg.releaseAfter;
+  if (after > 0 && link.server?.connected && Date.now() - lastActivity >= after * 1000) releaseLight();
+}
 
 function withTimeout(p, ms, what) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out')), ms))]); }
 // A remembered light may need to be "seen" advertising before Chrome can connect to it again.
@@ -422,6 +446,7 @@ async function connect(interactive) {
       if (reply[0] !== 0x0d || reply.length < 9) throw new Error('Unexpected login reply ' + P.hex(reply.slice(0, 4)));
       Object.assign(link, { server, pair, cmd, status, key: P.makeSessionKey(cfg.mesh, cfg.pass, rnd, reply.slice(1, 9)) });
       try { await status.writeValueWithResponse(new Uint8Array([1])); } catch (e) { log('status enable failed', e.message); }
+      lastActivity = Date.now(); link.released = false;
       setConn('connected', 'Connected');
       return true;
     } catch (e) {
@@ -457,6 +482,7 @@ async function pump() {
       if (!(await connect(true))) { pending.clear(); break; }
       const [ch, item] = pending.entries().next().value; pending.delete(ch);
       const command = item;
+      lastActivity = Date.now(); link.released = false;
       try { await writeRaw(P.makeCommandPacket(link.key, item.dest, item.command)); }
       catch (e) {
         log('write failed', e.message);
@@ -535,7 +561,7 @@ $('conn').onclick = () => connect(true);
 const dlg = $('settings');
 function openSettings() {
   $('sName').value = cfg.name; $('sMesh').value = cfg.mesh; $('sMeshPass').value = cfg.pass;
-  $('sMeshId').value = cfg.meshId || ''; $('epFront').value = cfg.epFront; $('epBack').value = cfg.epBack; $('sBackId').value = cfg.backId || '';
+  $('releaseAfter').value = String(cfg.releaseAfter ?? 30); $('sMeshId').value = cfg.meshId || ''; $('epFront').value = cfg.epFront; $('epBack').value = cfg.epBack; $('sBackId').value = cfg.backId || '';
   if (!dlg.open) dlg.showModal();
 }
 $('openSettings').onclick = openSettings; $('hintSetup').onclick = openSettings;
@@ -552,6 +578,7 @@ function saveConn(quiet) {
 }
 $('saveConn').onclick = () => saveConn(false);
 $('epFront').onchange = $('epBack').onchange = () => saveConn(true);
+$('releaseAfter').onchange = () => { cfg.releaseAfter = +$('releaseAfter').value; store.set('cfg', cfg); };
 
 async function blink(ep, dest) {
   saveConn(true);
@@ -733,7 +760,15 @@ function applyTheme() {
 $('themeBtns').onclick = (e) => { const b = e.target.closest('[data-theme-set]'); if (!b) return; cfg.theme = b.dataset.themeSet; store.set('cfg', cfg); applyTheme(); };
 
 // keep the link alive while the app is open (the light drops idle connections)
-setInterval(() => { if (link.key && link.server?.connected && !pumping && document.visibilityState === 'visible') writeRaw(P.makeStatusPoll(link.key)).catch(() => {}); }, 8000);
+setInterval(() => {
+  idleCheck();
+  // keep the link alive while it is wanted (the light drops silent connections)
+  if (link.key && link.server?.connected && !pumping && document.visibilityState === 'visible') writeRaw(P.makeStatusPoll(link.key)).catch(() => {});
+}, 5000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') idleCheck();
+  else if (configured() && !link.server?.connected) connect(false); // get ready again when you come back
+});
 
 // ---------- boot ----------
 applyTheme(); renderChips(); renderScenes(); render();
