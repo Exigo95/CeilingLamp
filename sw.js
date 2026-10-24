@@ -1,6 +1,6 @@
 // Offline support. Online: always loads the newest files from GitHub. Offline: uses the saved copy.
 // Raise VERSION (and APP_VERSION in index.html) after editing any file.
-const VERSION = 'ceiling-light-1.4';
+const VERSION = 'ceiling-light-1.5';
 const FILES = ['./', 'index.html', 'protocol.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' }))))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => {

@@ -255,7 +255,7 @@ code { font-family: var(--num); font-size: 12px; }
 <script src="protocol.js"></script>
 <script>
 'use strict';
-const APP_VERSION = '1.4'; // shown in the app; keep in step with VERSION in sw.js
+const APP_VERSION = '1.5'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -363,6 +363,7 @@ function withTimeout(p, ms, what) { return Promise.race([p, new Promise((_, rej)
 
 async function connect(interactive) {
   if (link.key && link.server?.connected) return true;
+  if (!link.key && link.server?.connected) { try { link.server.disconnect(); } catch {} await new Promise((r) => setTimeout(r, 300)); }
   if (link.connecting) return link.connecting;
   link.connecting = (async () => {
     if (!navigator.bluetooth) { $('noBt').hidden = false; return false; }
@@ -383,6 +384,7 @@ async function connect(interactive) {
       if (reply[0] === 0x0e) throw new Error('The light rejected the mesh name or password');
       if (reply[0] !== 0x0d || reply.length < 9) throw new Error('Unexpected login reply ' + P.hex(reply.slice(0, 4)));
       Object.assign(link, { server, pair, cmd, status, key: P.makeSessionKey(cfg.mesh, cfg.pass, rnd, reply.slice(1, 9)) });
+      try { await status.writeValueWithResponse(new Uint8Array([1])); } catch (e) { log('status enable failed', e.message); }
       setConn('connected', 'Connected');
       return true;
     } catch (e) {
@@ -396,10 +398,16 @@ async function connect(interactive) {
   return link.connecting;
 }
 
-async function writeRaw(packet) {
-  const c = link.cmd;
-  if (c.writeValueWithoutResponse) await c.writeValueWithoutResponse(packet); else await c.writeValue(packet);
+// The light handles one Bluetooth operation at a time: queue every read and write.
+let gattChain = Promise.resolve();
+function gatt(fn) { const run = gattChain.then(fn, fn); gattChain = run.catch(() => {}); return run; }
+function writeRaw(packet) {
+  return gatt(async () => {
+    const c = link.cmd;
+    if (c.writeValueWithoutResponse) await c.writeValueWithoutResponse(packet); else await c.writeValue(packet);
+  });
 }
+const readStatus = () => gatt(async () => new Uint8Array((await link.status.readValue()).buffer));
 
 // Coalescing command queue: rapid slider moves only send the newest value per channel.
 const pending = new Map();
@@ -413,7 +421,12 @@ async function pump() {
       const [ch, item] = pending.entries().next().value; pending.delete(ch);
       const command = item;
       try { await writeRaw(P.makeCommandPacket(link.key, item.dest, item.command)); }
-      catch (e) { log('write failed', e.message); link.key = null; pending.set(ch, command); if (!(await connect(false))) { pending.clear(); break; } }
+      catch (e) {
+        log('write failed', e.message);
+        await new Promise((r) => setTimeout(r, 200));
+        if (link.server?.connected) { try { await writeRaw(P.makeCommandPacket(link.key, item.dest, item.command)); } catch (e2) { log('retry failed', e2.message); } }
+        else { link.key = null; pending.set(ch, command); if (!(await connect(false))) { pending.clear(); break; } }
+      }
       await new Promise((r) => setTimeout(r, 45));
     }
   } finally { pumping = false; }
@@ -516,7 +529,7 @@ async function scanMeshIds() {
     for (let round = 0; round < 2; round++) {
       await writeRaw(P.makeStatusPoll(link.key));
       for (let i = 0; i < 6; i++) {
-        const st = P.parseStatus(link.key, new Uint8Array((await link.status.readValue()).buffer));
+        const st = P.parseStatus(link.key, await readStatus());
         if (st && st.meshId) { ids.add(st.meshId); log('status', st.meshId, P.hex(st.block)); }
         await sleep(100);
       }
@@ -530,10 +543,17 @@ $('findBack').onclick = async () => {
   const base = cfg.meshId;
   const others = (await scanMeshIds()).filter((id) => id !== base);
   log('mesh ids seen', base, others.join(',') || '-');
-  const tries = [{ label: 'all zones at once', dest: base, ep: 0xff }];
+  const tries = [
+    { label: 'zone 1 with a colour command', dest: base, ep: 1, colorOnly: true },
+    { label: 'all zones at once', dest: base, ep: 0xff },
+    { label: 'every light in the mesh', dest: 0xffff, ep: 0xff },
+  ];
   for (const ep of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) tries.push({ label: `zone ${ep}`, dest: base, ep });
   for (const id of [...others, base + 1]) for (const ep of [1, 2, 3]) tries.push({ label: `light ID ${id}, zone ${ep}`, dest: id, ep });
-  const red = (t) => { send('find.on', Z.level(t.ep, 254), t.dest); send('find.col', Z.hueSat(t.ep, 0, 254), t.dest); };
+  const red = (t) => {
+    if (t.colorOnly) { send('find.col', Z.hueSat(t.ep, 0, 254), t.dest); return; }
+    send('find.on', Z.level(t.ep, 254), t.dest); send('find.col', Z.hueSat(t.ep, 0, 254), t.dest);
+  };
   finder = { stop: false, current: null, hit: null };
   $('finder').hidden = false; $('findBack').disabled = true;
   for (let i = 0; i < tries.length && !finder.stop && !finder.hit; i++) {
@@ -547,7 +567,8 @@ $('findBack').onclick = async () => {
       send('find.off', Z.off(0xff), base); await sleep(1500); applyAll(); await sleep(800); continue;
     }
     if (finder.hit || finder.stop) break;
-    if (t.ep !== +cfg.epFront || t.dest !== base) send('find.off', Z.off(t.ep), t.dest);
+    if (t.colorOnly) { applyAll(); await sleep(600); }
+    else if (t.ep !== +cfg.epFront || t.dest !== base) send('find.off', Z.off(t.ep), t.dest);
     await sleep(400);
   }
   const hit = finder.hit;
@@ -585,7 +606,7 @@ $('discover').onclick = async () => {
     for (let round = 0; round < 3; round++) {
       await writeRaw(P.makeStatusPoll(link.key));
       for (let i = 0; i < 8; i++) {
-        const v = new Uint8Array((await link.status.readValue()).buffer);
+        const v = await readStatus();
         const st = P.parseStatus(link.key, v);
         if (st && st.meshId) { ids.set(st.meshId, (ids.get(st.meshId) || 0) + 1); log('status from', st.meshId, P.hex(st.block)); }
         await new Promise((r) => setTimeout(r, 120));
