@@ -188,8 +188,9 @@ code { font-family: var(--num); font-size: 12px; }
     <div class="card">
       <h3>1 · Import from your EGLO account</h3>
       <p>Uses the same email and password as the AwoX HomeControl / EGLO app. Your password is used once to fetch the light's Bluetooth key and is not stored.</p>
-      <label class="field"><span>Email</span><input id="cloudEmail" type="email" autocomplete="username"></label>
-      <label class="field"><span>Password</span><input id="cloudPass" type="password" autocomplete="current-password"></label>
+      <label class="field"><span>Email</span><input id="cloudEmail" type="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label class="field"><span>Password</span><input id="cloudPass" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)"><input type="checkbox" id="showPass"> Show password</label>
       <div class="actions"><button class="btn" id="cloudImport" type="button">Import</button></div>
       <div class="msg" id="cloudMsg" hidden></div>
       <div class="list" id="cloudDevices"></div>
@@ -245,7 +246,7 @@ code { font-family: var(--num); font-size: 12px; }
 <script src="protocol.js"></script>
 <script>
 'use strict';
-const APP_VERSION = '1.2'; // shown in the app; keep in step with VERSION in sw.js
+const APP_VERSION = '1.3'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -538,6 +539,18 @@ async function parsePost(base, path, body, session) {
   return j;
 }
 function installId() { let id = store.get('install', null); if (!id) { id = crypto.randomUUID(); store.set('install', id); } return id; }
+$('showPass').onchange = () => { $('cloudPass').type = $('showPass').checked ? 'text' : 'password'; };
+// Phone keyboards often capitalise the email or add a trailing space; the server is case-sensitive.
+async function loginAny(base, email, pass) {
+  const users = [...new Set([email, email.toLowerCase()])];
+  const passes = [...new Set([pass, pass.trim()])].filter(Boolean);
+  let last;
+  for (const u of users) for (const p of passes) {
+    try { return await parsePost(base, 'login', { username: u, password: p, _method: 'GET' }); }
+    catch (e) { last = e; if (e.code !== 101) throw e; }
+  }
+  throw last;
+}
 $('cloudImport').onclick = async () => {
   const email = $('cloudEmail').value.trim(), pass = $('cloudPass').value;
   const msg = $('cloudMsg'), list = $('cloudDevices');
@@ -546,7 +559,7 @@ $('cloudImport').onclick = async () => {
   let lastErr;
   for (const base of CLOUD.bases) {
     try {
-      const login = await parsePost(base, 'login', { username: email, password: pass, _method: 'GET' });
+      const login = await loginAny(base, email, pass);
       const where = { where: { owner: { __type: 'Pointer', className: '_User', objectId: login.objectId } }, _method: 'GET' };
       const [creds, devs] = await Promise.all([parsePost(base, 'classes/Credential', where, login.sessionToken), parsePost(base, 'classes/Device', where, login.sessionToken)]);
       const zig = creds.results.find((c) => c.service === 'zigbee') || creds.results.find((c) => c.service === 'mesh');
