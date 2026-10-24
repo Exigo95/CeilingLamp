@@ -135,6 +135,15 @@ code { font-family: var(--num); font-size: 12px; }
     <b>First-time setup needed.</b> Open settings to import your light from your EGLO account. It takes about a minute.
     <div class="actions" style="margin-top:10px"><button class="btn small" id="hintSetup" type="button">Set up</button></div>
   </div>
+  <div class="msg warn" id="autoTip" hidden>
+    <b>Connect automatically:</b> Chrome forgets your light each time unless you turn on one setting.
+    Open a new tab, type <code id="flagUrl">chrome://flags/#enable-web-bluetooth-new-permissions-backend</code>, set
+    <b>Use the new permissions backend for Web Bluetooth</b> to <b>Enabled</b>, and tap <b>Relaunch</b>.
+    <div class="actions" style="margin-top:10px">
+      <button class="btn small" id="copyFlag" type="button">Copy address</button>
+      <button class="btn small secondary" id="hideTip" type="button">Not now</button>
+    </div>
+  </div>
   <div class="msg err" id="noBt" hidden>This browser can't use Bluetooth. Open the app in <b>Chrome on Android</b> (or Chrome/Edge on a computer).</div>
 
   <section class="stage" aria-label="Light preview">
@@ -255,7 +264,7 @@ code { font-family: var(--num); font-size: 12px; }
 <script src="protocol.js"></script>
 <script>
 'use strict';
-const APP_VERSION = '1.6'; // shown in the app; keep in step with VERSION in sw.js
+const APP_VERSION = '1.7'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -366,7 +375,8 @@ async function rememberedDevice() {
   try {
     const id = store.get('deviceId', null);
     const list = await navigator.bluetooth.getDevices();
-    const d = list.find((x) => x.id === id) || null;
+    log('remembered devices', list.length);
+    const d = list.find((x) => x.id === id) || (list.length === 1 ? list[0] : null);
     if (d && !d._listening) { d.addEventListener('gattserverdisconnected', onDisconnect); d._listening = true; }
     return d;
   } catch { return null; }
@@ -374,6 +384,19 @@ async function rememberedDevice() {
 function onDisconnect() { link.key = null; link.server = null; setConn('idle', 'Disconnected · tap to reconnect'); log('disconnected'); }
 
 function withTimeout(p, ms, what) { return Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what + ' timed out')), ms))]); }
+// A remembered light may need to be "seen" advertising before Chrome can connect to it again.
+async function connectGatt(device) {
+  try { return await withTimeout(device.gatt.connect(), 6000, 'Connect'); }
+  catch (e) {
+    if (!device.watchAdvertisements) throw e;
+    log('waiting for the light to advertise');
+    const ctrl = new AbortController();
+    try {
+      await withTimeout(new Promise((res) => { device.addEventListener('advertisementreceived', res, { once: true }); device.watchAdvertisements({ signal: ctrl.signal }).catch(res); }), 8000, 'Finding the light');
+    } finally { ctrl.abort(); }
+    return await withTimeout(device.gatt.connect(), 8000, 'Connect');
+  }
+}
 
 async function connect(interactive) {
   if (link.key && link.server?.connected) return true;
@@ -387,7 +410,7 @@ async function connect(interactive) {
       if (!link.device) link.device = await rememberedDevice();
       if (!link.device) { if (!interactive) throw new Error('Tap to choose your light'); await pickDevice(); }
       let server;
-      try { server = await withTimeout(link.device.gatt.connect(), 10000, 'Connect'); }
+      try { server = await connectGatt(link.device); }
       catch (e) { if (!interactive) throw e; await pickDevice(); server = await withTimeout(link.device.gatt.connect(), 10000, 'Connect'); }
       const svc = await server.getPrimaryService(P.SERVICE);
       const [pair, cmd, status] = await Promise.all([P.PAIR_CHAR, P.COMMAND_CHAR, P.STATUS_CHAR].map((u) => svc.getCharacteristic(u)));
@@ -716,6 +739,13 @@ setInterval(() => { if (link.key && link.server?.connected && !pumping && docume
 applyTheme(); renderChips(); renderScenes(); render();
 if (!navigator.bluetooth) $('noBt').hidden = false;
 $('setupHint').hidden = !!configured();
+$('autoTip').hidden = !(navigator.bluetooth && !navigator.bluetooth.getDevices && configured() && !store.get('tipHidden', false));
+$('copyFlag').onclick = async () => {
+  const t = $('flagUrl').textContent;
+  try { await navigator.clipboard.writeText(t); toast('Copied. Paste it into a new Chrome tab.'); }
+  catch { const r = document.createRange(); r.selectNodeContents($('flagUrl')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Long-press to copy'); }
+};
+$('hideTip').onclick = () => { store.set('tipHidden', true); $('autoTip').hidden = true; };
 if (configured()) connect(false); // silently reconnect to a remembered light
 $('ver').textContent = 'Version ' + APP_VERSION; $('verSettings').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
