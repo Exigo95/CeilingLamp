@@ -115,6 +115,9 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .msg.err { color: var(--danger); }
 .warn { border: 1px solid var(--line); background: var(--surface); }
 code { font-family: var(--num); font-size: 12px; }
+.qr { background: #fff; padding: 10px; border-radius: 12px; width: min(260px, 100%); line-height: 0; }
+.qr svg { width: 100%; height: auto; display: block; }
+.share-link { display: block; max-width: 100%; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; user-select: all; }
 .ver { margin: 4px 0 0; text-align: center; color: var(--muted); font: 12px var(--num); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
@@ -131,6 +134,13 @@ code { font-family: var(--num); font-size: 12px; }
     </button>
   </header>
 
+  <div class="msg warn" id="shareOffer" hidden>
+    <span id="shareOfferText"></span>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn small" id="shareAccept" type="button">Use this light</button>
+      <button class="btn small secondary" id="shareDecline" type="button">Keep my settings</button>
+    </div>
+  </div>
   <div class="msg warn" id="setupHint" hidden>
     <b>First-time setup needed.</b> Open settings to import your light from your EGLO account. It takes about a minute.
     <div class="actions" style="margin-top:10px"><button class="btn small" id="hintSetup" type="button">Set up</button></div>
@@ -244,6 +254,17 @@ code { font-family: var(--num); font-size: 12px; }
     </div>
 
     <div class="card">
+      <h3>Share with others</h3>
+      <p>Others scan this code with their phone camera and get a link that sets up this website for your light, without an EGLO account. The link contains your light's Bluetooth key, so only share it with people who may control the light.</p>
+      <div class="actions"><button class="btn secondary" id="shareShow" type="button">Show QR code</button></div>
+      <div id="shareBox" hidden style="display:grid;gap:10px;justify-items:center">
+        <div id="qr" class="qr" role="img" aria-label="QR code with the setup link"></div>
+        <code id="shareLink" class="share-link"></code>
+        <div class="actions"><button class="btn small" id="shareCopy" type="button">Copy link</button></div>
+      </div>
+    </div>
+
+    <div class="card">
       <h3>Sharing the light</h3>
       <p>The light accepts one connection at a time. The app lets go of it when you haven't used it for a while, so your phone and PC can take turns. It reconnects by itself as soon as you use a control.</p>
       <label class="field"><span>Release the light after</span>
@@ -269,9 +290,10 @@ code { font-family: var(--num); font-size: 12px; }
 </dialog>
 
 <script src="protocol.js"></script>
+<script src="qrcode.js"></script>
 <script>
 'use strict';
-const APP_VERSION = '1.8'; // shown in the app; keep in step with VERSION in sw.js
+const APP_VERSION = '1.9'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -781,6 +803,59 @@ $('copyFlag').onclick = async () => {
   catch { const r = document.createRange(); r.selectNodeContents($('flagUrl')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Long-press to copy'); }
 };
 $('hideTip').onclick = () => { store.set('tipHidden', true); $('autoTip').hidden = true; };
+// ---------- share via QR code ----------
+// The setup travels in the part of the link after "#", which browsers never send to the web server.
+const b64url = (str) => btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = (str) => decodeURIComponent(escape(atob(str.replace(/-/g, '+').replace(/_/g, '/'))));
+function shareLink() {
+  const data = { v: 1, n: cfg.name, m: cfg.mesh, p: cfg.pass, i: cfg.meshId, f: cfg.epFront, b: cfg.epBack };
+  if (cfg.backId) data.k = cfg.backId;
+  return location.origin + location.pathname + '#setup=' + b64url(JSON.stringify(data));
+}
+$('shareShow').onclick = () => {
+  saveConn(true);
+  if (!configured()) return toast('Set up the light first, then share it');
+  if (typeof qrcode !== 'function') return toast('The QR code could not be created. Reload the page and try again.');
+  const link = shareLink();
+  const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
+  $('qr').innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true });
+  $('shareLink').textContent = link;
+  $('shareBox').hidden = false; $('shareShow').textContent = 'Update QR code';
+};
+$('shareCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText($('shareLink').textContent); toast('Link copied'); }
+  catch { const r = document.createRange(); r.selectNodeContents($('shareLink')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Select and copy the link'); }
+};
+
+function readShared() {
+  const m = location.hash.match(/^#setup=([A-Za-z0-9_-]+)/);
+  if (!m) return null;
+  history.replaceState(null, '', location.pathname + location.search); // keep the key out of the address bar and history
+  try {
+    const d = JSON.parse(unb64url(m[1]));
+    if (!d.m || !d.p || !(d.i > 0)) throw new Error('incomplete');
+    return d;
+  } catch { toast('This setup link is damaged. Ask for a new QR code.', 5000); return null; }
+}
+function applyShared(d) {
+  Object.assign(cfg, { name: d.n || 'Ceiling light', mesh: d.m, pass: d.p, meshId: +d.i, epFront: +d.f || 1, epBack: +d.b || 1, backId: d.k ? +d.k : null });
+  store.set('cfg', cfg); store.set('deviceId', null);
+  link.device = null; link.key = null;
+  render(); $('setupHint').hidden = true; $('shareOffer').hidden = true;
+  toast(`Set up for “${cfg.name}”. Tap “Tap to connect” and pick the light.`, 6000);
+}
+const sharedSetup = readShared();
+if (sharedSetup) {
+  const same = cfg.mesh === sharedSetup.m && cfg.pass === sharedSetup.p && +cfg.meshId === +sharedSetup.i;
+  if (!configured()) applyShared(sharedSetup);
+  else if (!same) {
+    $('shareOfferText').textContent = `This link sets up the website for “${sharedSetup.n || 'Ceiling light'}”. Replace your current light settings?`;
+    $('shareOffer').hidden = false;
+    $('shareAccept').onclick = () => applyShared(sharedSetup);
+    $('shareDecline').onclick = () => { $('shareOffer').hidden = true; };
+  }
+}
+
 if (configured()) connect(false); // silently reconnect to a remembered light
 $('ver').textContent = 'Version ' + APP_VERSION; $('verSettings').textContent = 'v' + APP_VERSION;
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
