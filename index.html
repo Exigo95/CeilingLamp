@@ -115,6 +115,7 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
 .msg.err { color: var(--danger); }
 .warn { border: 1px solid var(--line); background: var(--surface); }
 code { font-family: var(--num); font-size: 12px; }
+.ver { margin: 4px 0 0; text-align: center; color: var(--muted); font: 12px var(--num); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -175,13 +176,14 @@ code { font-family: var(--num); font-size: 12px; }
     <div class="card-head"><div><h2>Scenes</h2><small>Tap to apply · save the current look as your own</small></div></div>
     <div class="scenes" id="scenes"></div>
   </section>
+  <p class="ver" id="ver"></p>
 </main>
 
 <div class="toast" id="toast" role="status" hidden></div>
 
 <dialog id="settings">
   <div class="sheet">
-    <div class="card-head"><h2>Settings</h2><button class="btn small secondary" id="closeSettings" type="button">Done</button></div>
+    <div class="card-head"><h2>Settings <small class="ver" id="verSettings" style="display:inline;margin-left:6px"></small></h2><button class="btn small secondary" id="closeSettings" type="button">Done</button></div>
 
     <div class="card">
       <h3>1 · Import from your EGLO account</h3>
@@ -243,6 +245,7 @@ code { font-family: var(--num); font-size: 12px; }
 <script src="protocol.js"></script>
 <script>
 'use strict';
+const APP_VERSION = '1.2'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -584,7 +587,13 @@ applyTheme(); renderChips(); renderScenes(); render();
 if (!navigator.bluetooth) $('noBt').hidden = false;
 $('setupHint').hidden = !!configured();
 if (configured()) connect(false); // silently reconnect to a remembered light
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+$('ver').textContent = 'Version ' + APP_VERSION; $('verSettings').textContent = 'v' + APP_VERSION;
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).catch(() => {});
+  // A new version took over: tell the user once.
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && navigator.serviceWorker.controller) { reloaded = true; toast('Updated to the latest version'); } });
+}
 </script>
 </body>
 </html>
