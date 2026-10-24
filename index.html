@@ -214,11 +214,20 @@ code { font-family: var(--num); font-size: 12px; }
 
     <div class="card">
       <h3>3 · Front and back zones</h3>
-      <p>EGLO dual-zone lights use zone 1 for white and zone 3 for colour. Use Blink to check which part of your light responds.</p>
-      <div class="grid2">
-        <label class="field"><span>Front (white)</span><select id="epFront"><option>1</option><option>2</option><option>3</option></select></label>
-        <label class="field"><span>Back (colour)</span><select id="epBack"><option>1</option><option>2</option><option selected>3</option></select></label>
+      <p>If the back light doesn't respond, tap <b>Find back light</b> and watch the lamp. The app tries each possible zone for about 3 seconds. Tap the big button as soon as the back light turns red.</p>
+      <div class="actions"><button class="btn" id="findBack" type="button">Find back light</button></div>
+      <div class="msg" id="finder" hidden>
+        <div id="finderText" style="font-weight:700"></div>
+        <div class="actions" style="margin-top:10px">
+          <button class="btn" id="finderHit" type="button">The back light reacted</button>
+          <button class="btn secondary small" id="finderStop" type="button">Stop</button>
+        </div>
       </div>
+      <div class="grid2">
+        <label class="field"><span>Front zone</span><input id="epFront" type="number" min="1" max="255" inputmode="numeric"></label>
+        <label class="field"><span>Back zone</span><input id="epBack" type="number" min="1" max="255" inputmode="numeric"></label>
+      </div>
+      <label class="field"><span>Back light ID (empty = same light)</span><input id="sBackId" type="number" min="1" max="65535" inputmode="numeric"></label>
       <div class="actions">
         <button class="btn secondary small" id="blinkFront" type="button">Blink front</button>
         <button class="btn secondary small" id="blinkBack" type="button">Blink back</button>
@@ -238,7 +247,7 @@ code { font-family: var(--num); font-size: 12px; }
       <summary><b>Troubleshooting</b></summary>
       <p style="margin-top:10px">If connecting fails, close the EGLO/AwoX app completely: a light accepts only one Bluetooth connection at a time. Stay within a few metres of the light. Turn on Location on Android if Chrome asks for it.</p>
       <div class="msg" id="log" style="font-family:var(--num);font-size:11px;white-space:pre-wrap;max-height:180px;overflow:auto;margin-top:10px"></div>
-      <div class="actions" style="margin-top:10px"><button class="btn secondary small" id="forget" type="button">Forget all settings</button></div>
+      <div class="actions" style="margin-top:10px"><button class="btn secondary small" id="copyLog" type="button">Copy log</button><button class="btn secondary small" id="forget" type="button">Forget all settings</button></div>
     </details>
   </div>
 </dialog>
@@ -246,7 +255,7 @@ code { font-family: var(--num); font-size: 12px; }
 <script src="protocol.js"></script>
 <script>
 'use strict';
-const APP_VERSION = '1.3'; // shown in the app; keep in step with VERSION in sw.js
+const APP_VERSION = '1.4'; // shown in the app; keep in step with VERSION in sw.js
 const P = window.EgloProtocol;
 const $ = (id) => document.getElementById(id);
 
@@ -256,7 +265,7 @@ const store = {
   set(k, v) { try { localStorage.setItem('eglo.' + k, JSON.stringify(v)); } catch {} },
 };
 const DEFAULT_STATE = { front: { on: true, bri: 80, kelvin: 4000 }, back: { on: true, bri: 60, hue: 260, sat: 80 } };
-let cfg = Object.assign({ name: 'Ceiling light', mesh: '', pass: '', meshId: null, epFront: 1, epBack: 3, theme: 'system' }, store.get('cfg', {}));
+let cfg = Object.assign({ name: 'Ceiling light', mesh: '', pass: '', meshId: null, backId: null, epFront: 1, epBack: 3, theme: 'system' }, store.get('cfg', {}));
 let state = Object.assign(structuredClone(DEFAULT_STATE), store.get('state', {}));
 const BUILTIN_SCENES = [
   { name: 'Bright', builtin: true, front: { on: true, bri: 100, kelvin: 5000 }, back: { on: true, bri: 70, hue: 210, sat: 15 } },
@@ -326,7 +335,7 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 
 let toastTimer;
 function toast(text, ms = 2600) { const t = $('toast'); t.textContent = text; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), ms); }
-function log(...a) { const l = $('log'); l.textContent = (new Date().toLocaleTimeString() + ' ' + a.join(' ') + '\n' + l.textContent).slice(0, 4000); console.log(...a); }
+function log(...a) { const l = $('log'); l.textContent = (new Date().toLocaleTimeString() + ' ' + a.join(' ') + '\n' + l.textContent).slice(0, 12000); console.log(...a); }
 
 // ---------- Bluetooth link ----------
 const link = { device: null, server: null, pair: null, cmd: null, status: null, key: null, connecting: null };
@@ -395,14 +404,15 @@ async function writeRaw(packet) {
 // Coalescing command queue: rapid slider moves only send the newest value per channel.
 const pending = new Map();
 let pumping = false;
-function send(channel, command) { pending.set(channel, command); pump(); }
+function send(channel, command, dest) { pending.set(channel, { command, dest: dest || cfg.meshId }); pump(); }
 async function pump() {
   if (pumping) return; pumping = true;
   try {
     while (pending.size) {
       if (!(await connect(true))) { pending.clear(); break; }
-      const [ch, command] = pending.entries().next().value; pending.delete(ch);
-      try { await writeRaw(P.makeCommandPacket(link.key, cfg.meshId, command)); }
+      const [ch, item] = pending.entries().next().value; pending.delete(ch);
+      const command = item;
+      try { await writeRaw(P.makeCommandPacket(link.key, item.dest, item.command)); }
       catch (e) { log('write failed', e.message); link.key = null; pending.set(ch, command); if (!(await connect(false))) { pending.clear(); break; } }
       await new Promise((r) => setTimeout(r, 45));
     }
@@ -419,11 +429,11 @@ function sendFront(what) {
   if (what === 'temp') send('f.temp', Z.colorTemp(ep, P.kelvinToMireds(f.kelvin)));
 }
 function sendBack(what) {
-  const b = state.back, ep = +cfg.epBack;
-  if (what === 'power') return send('b.power', b.on ? Z.level(ep, P.percentToLevel(b.bri)) : Z.off(ep));
+  const b = state.back, ep = +cfg.epBack, d = cfg.backId || cfg.meshId;
+  if (what === 'power') return send('b.power', b.on ? Z.level(ep, P.percentToLevel(b.bri)) : Z.off(ep), d);
   if (!b.on) return;
-  if (what === 'bri') send('b.bri', Z.level(ep, P.percentToLevel(b.bri)));
-  if (what === 'color') send('b.color', Z.hueSat(ep, Math.round(b.hue / 360 * 254), Math.round(b.sat * 2.54)));
+  if (what === 'bri') send('b.bri', Z.level(ep, P.percentToLevel(b.bri)), d);
+  if (what === 'color') send('b.color', Z.hueSat(ep, Math.round(b.hue / 360 * 254), Math.round(b.sat * 2.54)), d);
 }
 function applyAll() {
   sendFront('power'); if (state.front.on) sendFront('temp');
@@ -469,7 +479,7 @@ $('conn').onclick = () => connect(true);
 const dlg = $('settings');
 function openSettings() {
   $('sName').value = cfg.name; $('sMesh').value = cfg.mesh; $('sMeshPass').value = cfg.pass;
-  $('sMeshId').value = cfg.meshId || ''; $('epFront').value = cfg.epFront; $('epBack').value = cfg.epBack;
+  $('sMeshId').value = cfg.meshId || ''; $('epFront').value = cfg.epFront; $('epBack').value = cfg.epBack; $('sBackId').value = cfg.backId || '';
   if (!dlg.open) dlg.showModal();
 }
 $('openSettings').onclick = openSettings; $('hintSetup').onclick = openSettings;
@@ -479,7 +489,7 @@ function saveConn(quiet) {
   cfg.name = $('sName').value.trim() || 'Ceiling light';
   cfg.mesh = $('sMesh').value; cfg.pass = $('sMeshPass').value;
   cfg.meshId = +$('sMeshId').value || null;
-  cfg.epFront = +$('epFront').value; cfg.epBack = +$('epBack').value;
+  cfg.epFront = +$('epFront').value || 1; cfg.epBack = +$('epBack').value || 3; cfg.backId = +$('sBackId').value || null;
   store.set('cfg', cfg); render(); $('setupHint').hidden = !!configured();
   if (changedCreds) link.key = null;
   if (!quiet) toast('Saved');
@@ -487,16 +497,81 @@ function saveConn(quiet) {
 $('saveConn').onclick = () => saveConn(false);
 $('epFront').onchange = $('epBack').onchange = () => saveConn(true);
 
-async function blink(ep) {
+async function blink(ep, dest) {
   saveConn(true);
   for (let i = 0; i < 2; i++) {
-    send('blink', Z.off(ep)); await new Promise((r) => setTimeout(r, 600));
-    send('blink', Z.on(ep)); await new Promise((r) => setTimeout(r, 600));
+    send('blink', Z.off(ep), dest); await new Promise((r) => setTimeout(r, 600));
+    send('blink', Z.on(ep), dest); await new Promise((r) => setTimeout(r, 600));
   }
   applyAll(); // restore the look you had before the test
 }
 $('blinkFront').onclick = () => blink(+$('epFront').value);
-$('blinkBack').onclick = () => blink(+$('epBack').value);
+$('blinkBack').onclick = () => blink(+$('epBack').value, +$('sBackId').value || null);
+// ---------- Find back light: try each possible zone/address until the person sees the back light react ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let finder = null;
+async function scanMeshIds() {
+  const ids = new Set();
+  try {
+    for (let round = 0; round < 2; round++) {
+      await writeRaw(P.makeStatusPoll(link.key));
+      for (let i = 0; i < 6; i++) {
+        const st = P.parseStatus(link.key, new Uint8Array((await link.status.readValue()).buffer));
+        if (st && st.meshId) { ids.add(st.meshId); log('status', st.meshId, P.hex(st.block)); }
+        await sleep(100);
+      }
+    }
+  } catch (e) { log('scan error', e.message); }
+  return [...ids];
+}
+$('findBack').onclick = async () => {
+  saveConn(true);
+  if (!(await connect(true))) return;
+  const base = cfg.meshId;
+  const others = (await scanMeshIds()).filter((id) => id !== base);
+  log('mesh ids seen', base, others.join(',') || '-');
+  const tries = [{ label: 'all zones at once', dest: base, ep: 0xff }];
+  for (const ep of [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) tries.push({ label: `zone ${ep}`, dest: base, ep });
+  for (const id of [...others, base + 1]) for (const ep of [1, 2, 3]) tries.push({ label: `light ID ${id}, zone ${ep}`, dest: id, ep });
+  const red = (t) => { send('find.on', Z.level(t.ep, 254), t.dest); send('find.col', Z.hueSat(t.ep, 0, 254), t.dest); };
+  finder = { stop: false, current: null, hit: null };
+  $('finder').hidden = false; $('findBack').disabled = true;
+  for (let i = 0; i < tries.length && !finder.stop && !finder.hit; i++) {
+    const t = tries[i]; finder.current = t;
+    $('finderText').textContent = `Testing ${i + 1} of ${tries.length}: ${t.label}`;
+    log('finder try', t.label);
+    red(t); await sleep(2800);
+    if (finder.hit && finder.hit.ep === 0xff) {
+      finder.hit = null; finder.broadcastOk = true;
+      $('finderText').textContent = 'The back light responds. Now finding its exact zone…';
+      send('find.off', Z.off(0xff), base); await sleep(1500); applyAll(); await sleep(800); continue;
+    }
+    if (finder.hit || finder.stop) break;
+    if (t.ep !== +cfg.epFront || t.dest !== base) send('find.off', Z.off(t.ep), t.dest);
+    await sleep(400);
+  }
+  const hit = finder.hit;
+  $('findBack').disabled = false;
+  if (!hit) {
+    $('finderText').textContent = finder.stop ? 'Stopped.' : finder.broadcastOk
+      ? 'The back light reacted to “all zones” but to no single zone. Set Back zone to 255 to control it that way, or copy the log for Claude.'
+      : 'No zone made the back light react. Tap “Copy log” under Troubleshooting and paste it into the chat.';
+    applyAll(); return;
+  }
+  cfg.epBack = hit.ep; cfg.backId = hit.dest === base ? null : hit.dest;
+  store.set('cfg', cfg); openSettings();
+  $('finderText').textContent = `Saved: back light is ${hit.label}.`;
+  log('finder hit', hit.label);
+  applyAll(); toast('Back light found and saved');
+};
+$('finderHit').onclick = () => { if (finder) finder.hit = finder.current; };
+$('finderStop').onclick = () => { if (finder) finder.stop = true; };
+$('copyLog').onclick = async () => {
+  const text = `Ceiling Light ${APP_VERSION}\ncfg: mesh id ${cfg.meshId}, front ${cfg.epFront}, back ${cfg.epBack}, backId ${cfg.backId}\n` + $('log').textContent;
+  try { await navigator.clipboard.writeText(text); toast('Log copied'); }
+  catch { const r = document.createRange(); r.selectNodeContents($('log')); getSelection().removeAllRanges(); getSelection().addRange(r); toast('Select and copy the log text'); }
+};
+
 
 // Mesh scan: ask every node for its status and list the mesh ids that answer.
 $('discover').onclick = async () => {
@@ -565,6 +640,7 @@ $('cloudImport').onclick = async () => {
       const zig = creds.results.find((c) => c.service === 'zigbee') || creds.results.find((c) => c.service === 'mesh');
       if (!zig) throw new Error('No Bluetooth key found in this account');
       $('sMesh').value = zig.client_id; $('sMeshPass').value = zig.access_token;
+      devs.results.forEach((d) => log('device', JSON.stringify({ name: d.displayName, type: d.type, hw: d.hardware, fw: d.firmware || d.version, addr: d.address, mac: d.macAddress, model: d.model || d.productReference || d.reference })));
       const lights = devs.results.filter((d) => d.address != null).map((d) => ({ name: (d.displayName || d.macAddress || 'Light').trim(), id: (+d.address + 65536) % 65536, type: d.type || '' }));
       $('cloudPass').value = '';
       saveConn(true);
