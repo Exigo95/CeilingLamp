@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- The Windows 10 2004+ TFM gives access to the WinRT Bluetooth LE APIs. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CeilingLamp</RootNamespace>
+    <AssemblyName>CeilingLamp</AssemblyName>
+    <ApplicationIcon>Assets\lamp.ico</ApplicationIcon>
+    <Version>1.1.0</Version>
+    <Product>Ceiling Light</Product>
+    <Company>Ceiling Light</Company>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Edge WebView2 hosts the control panel (Ui/app.html) -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Ui\app.html" LogicalName="app.html" />
+    <EmbeddedResource Include="Assets\lamp.ico" LogicalName="lamp.ico" />
+    <EmbeddedResource Include="Assets\lamp-off.ico" LogicalName="lamp-off.ico" />
+  </ItemGroup>
+
+</Project>

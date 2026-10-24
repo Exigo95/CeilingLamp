@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ceiling Light</title>
+<style>
+/* Layout: 380px tray flyout. Header strip, glowing lamp preview with power, light controls, colour wheel, scenes.
+   Settings slide in as a second view. The light's live colours are the only accent. */
+:root {
+  --night: #121417;      /* window */
+  --panel: #1a1d22;      /* sections */
+  --raised: #23272e;     /* controls */
+  --line: #2e333b;
+  --text: #eceae6;
+  --muted: #8f96a1;
+  --good: #72d3a2;
+  --bad: #ff8f80;
+  --front: #ffd9a8;      /* live: front light colour */
+  --back: #8a6cff;       /* live: back light colour */
+  --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--night); color: var(--text); font: 14px/1.4 var(--ui); user-select: none; }
+html { overflow-x: hidden; overflow-y: auto; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+[hidden] { display: none !important; }
+#app { width: 100%; }
+
+/* header: also the drag handle when pinned */
+header { display: flex; align-items: center; gap: 6px; padding: 12px 10px 8px 16px; }
+.name { flex: 1; min-width: 0; }
+.name h1 { margin: 0; font: 600 16px/1.2 var(--display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status { display: inline-flex; align-items: center; gap: 6px; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.status i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.status[data-s="Connected"] i { background: var(--good); box-shadow: 0 0 0 3px rgba(114,211,162,.18); }
+.status[data-s="Connecting"] i { background: #e6b84a; animation: blink 1s infinite; }
+.status[data-s="Error"] { color: var(--bad); } .status[data-s="Error"] i { background: var(--bad); }
+@keyframes blink { 50% { opacity: .3; } }
+.ico { width: 32px; height: 32px; border-radius: 8px; border: 0; background: transparent; color: var(--muted); display: grid; place-items: center; flex: none; }
+.ico:hover { background: var(--raised); color: var(--text); }
+.ico[aria-pressed="true"] { color: var(--text); background: var(--raised); }
+.ico svg { width: 17px; height: 17px; }
+
+/* lamp preview: the one bold element */
+.stage { position: relative; margin: 0 12px 4px; height: 136px; border-radius: 14px; background: #0a0b0d; overflow: hidden; display: grid; place-items: center; }
+.halo { position: absolute; width: 300px; height: 300px; border-radius: 50%;
+  background: radial-gradient(circle, var(--back) 0%, color-mix(in srgb, var(--back) 40%, transparent) 36%, transparent 66%); transition: opacity .3s, background .3s; }
+.disc { position: relative; width: 104px; height: 104px; border-radius: 50%; border: 3px solid #2a2f37;
+  background: radial-gradient(circle at 50% 42%, color-mix(in srgb, #fff 55%, var(--front)) 0%, var(--front) 64%, color-mix(in srgb, var(--front) 78%, #000) 100%);
+  box-shadow: 0 0 36px color-mix(in srgb, var(--front) 65%, transparent); transition: filter .3s, background .3s, box-shadow .3s; }
+.off .disc { background: #1c1f25; box-shadow: none; filter: none !important; }
+.off .halo { opacity: 0 !important; }
+.power { position: absolute; right: 12px; bottom: 12px; width: 46px; height: 46px; border-radius: 50%; border: 0; display: grid; place-items: center;
+  background: var(--text); color: #0a0b0d; box-shadow: 0 0 0 4px color-mix(in srgb, var(--front) 35%, transparent), 0 6px 18px rgba(0,0,0,.5); transition: background .2s, box-shadow .2s; }
+.off .power { background: #2a2f37; color: var(--muted); box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+.power svg { width: 21px; height: 21px; }
+.readout { position: absolute; left: 14px; bottom: 12px; font-size: 12px; color: #b9bec7; line-height: 1.45; font-variant-numeric: tabular-nums; }
+
+main { padding: 4px 16px 14px; display: grid; gap: 12px; }
+.group { display: grid; gap: 8px; }
+.group > h2 { margin: 6px 0 0; font: 600 13px/1.2 var(--display); color: var(--muted); }
+
+/* sliders */
+.slider { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; }
+.slider label { font-size: 13px; color: var(--muted); }
+.slider output { font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; min-width: 56px; }
+.slider input { grid-column: 1 / -1; }
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 26px; margin: 0; border-radius: 13px; background: var(--track, var(--raised)); cursor: pointer; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; background: #fff; border: 2px solid rgba(0,0,0,.25); box-shadow: 0 2px 6px rgba(0,0,0,.45); }
+.t-bright { --track: linear-gradient(90deg, #262a31, #f1efe9); }
+.t-temp { --track: linear-gradient(90deg, #ffb46b, #ffe9cf 45%, #e3edff); }
+
+.chips { display: flex; gap: 5px; }
+#tempChips .chip { flex: 1 1 0; justify-content: center; padding: 4px 2px; }
+#tempChips .chip i { display: none; }
+#tempChips .chip { border-bottom: 2px solid var(--c); }
+.chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 8px 3px 5px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.chip:hover { border-color: #444b56; }
+.chip i { width: 12px; height: 12px; border-radius: 50%; }
+
+/* colour: wheel + swatches */
+.colour { display: grid; grid-template-columns: 132px 1fr; gap: 6px 14px; align-items: center; }
+.wheel { position: relative; width: 132px; height: 132px; touch-action: none; cursor: crosshair; border-radius: 50%; }
+.wheel canvas { width: 132px; height: 132px; border-radius: 50%; display: block; }
+.wheel .dot { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 1px 6px rgba(0,0,0,.6); pointer-events: none; }
+.wheel:focus-visible { outline-offset: 4px; }
+.swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sw { height: 30px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08); }
+.sw:hover { transform: translateY(-1px); }
+.colour-meta { grid-column: 1 / -1; display: flex; justify-content: space-between; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+
+/* scenes */
+.scenes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.scene { position: relative; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 7px 9px; text-align: left; display: grid; gap: 6px; min-width: 0; }
+.scene:hover { border-color: #444b56; }
+.scene b { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 12px; }
+.scene .pv { display: flex; gap: 4px; }
+.scene .pv i { width: 14px; height: 14px; border-radius: 50%; }
+.scene .del { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; color: var(--muted); opacity: 0; font-size: 14px; }
+.scene:hover .del, .scene:focus-within .del { opacity: 1; }
+.scene .del:hover { background: var(--raised); color: var(--text); }
+.group-head { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+.group-head h2 { margin: 0; font: 600 13px/1.2 var(--display); color: var(--muted); }
+.link { border: 0; background: none; color: var(--text); font-size: 12.5px; padding: 2px 4px; border-radius: 6px; }
+.link:hover { background: var(--raised); }
+.save-row { display: flex; gap: 8px; }
+.save-row input { flex: 1; min-width: 0; }
+
+/* settings view */
+.view-settings main { gap: 12px; }
+.section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 10px; }
+.section h2 { margin: 0; font: 600 14px/1.2 var(--display); }
+.section p { margin: 0; color: var(--muted); font-size: 12.5px; }
+.field { display: grid; gap: 4px; }
+.field span { font-size: 12px; color: var(--muted); }
+input[type=text], input[type=password], input[type=number], select {
+  width: 100%; min-width: 0; background: var(--night); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; outline: none; user-select: text; }
+input:focus, select:focus { border-color: #5b6370; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 7px 14px; font-weight: 600; }
+.btn:hover { border-color: #4a515c; }
+.btn.primary { background: var(--text); color: #0a0b0d; border-color: var(--text); }
+.btn:disabled { opacity: .5; cursor: default; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.list { display: grid; gap: 4px; max-height: 150px; overflow: auto; }
+.list button { text-align: left; border: 1px solid var(--line); background: var(--night); border-radius: 8px; padding: 6px 9px; display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12.5px; }
+.list button span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
+.list button:hover { border-color: #4a515c; }
+.msg { font-size: 12.5px; color: var(--muted); }
+.msg.err { color: var(--bad); }
+.check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.check input { width: 16px; height: 16px; accent-color: #d8d4cc; }
+.log { font: 11px/1.45 Consolas, monospace; color: var(--muted); background: var(--night); border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 120px; overflow: auto; white-space: pre-wrap; user-select: text; }
+.toast { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); background: var(--text); color: #0a0b0d; padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.5); z-index: 5; white-space: nowrap; }
+
+::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="drag">
+    <div class="name">
+      <h1 id="title">Ceiling light</h1>
+      <button class="status" id="status" type="button" data-s="Idle" title="Connect now"><i></i><span id="statusText">Not connected</span></button>
+    </div>
+    <button class="ico" id="pin" type="button" aria-pressed="false" title="Keep open" aria-label="Keep window open">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8V4h6v6.8l3 3.2H6z"/></svg></button>
+    <button class="ico" id="toSettings" type="button" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    <button class="ico" id="close" type="button" title="Close" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </header>
+
+  <!-- ===== light view ===== -->
+  <section id="viewLight">
+    <div class="stage" id="stage">
+      <div class="halo" id="halo"></div>
+      <div class="disc" id="disc"></div>
+      <div class="readout" id="readout"></div>
+      <button class="power" id="power" type="button" aria-label="Turn the light on or off" aria-pressed="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.4 6.9a8 8 0 1 0 11.2 0"/></svg></button>
+    </div>
+    <main>
+      <div class="group">
+        <div class="slider"><label for="bri">Brightness</label><output id="briOut"></output>
+          <input type="range" id="bri" class="t-bright" min="1" max="100"></div>
+        <div class="slider"><label for="temp">Front light warmth</label><output id="tempOut"></output>
+          <input type="range" id="temp" class="t-temp" min="2700" max="6500" step="50"></div>
+        <div class="chips" id="tempChips"></div>
+      </div>
+
+      <div class="group">
+        <h2>Back light colour</h2>
+        <div class="colour">
+          <div class="wheel" id="wheel" tabindex="0" role="slider" aria-label="Back light colour" aria-valuemin="0" aria-valuemax="359">
+            <canvas id="wheelCanvas" width="264" height="264"></canvas><div class="dot" id="wheelDot"></div>
+          </div>
+          <div class="swatches" id="swatches"></div>
+          <div class="colour-meta"><span id="colName"></span><span id="colVal"></span></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-head"><h2>Scenes</h2><button class="link" id="addScene" type="button">Save current look</button></div>
+        <div class="scenes" id="scenes"></div>
+        <div class="save-row" id="saveRow" hidden>
+          <input type="text" id="sceneName" maxlength="24" placeholder="Name for this look">
+          <button class="btn primary" id="sceneSave" type="button">Save</button>
+          <button class="btn" id="sceneCancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </main>
+  </section>
+
+  <!-- ===== settings view ===== -->
+  <section id="viewSettings" class="view-settings" hidden>
+    <main>
+      <div class="actions"><button class="btn" id="back" type="button">Back to the light</button></div>
+
+      <div class="section">
+        <h2>Import from your EGLO account</h2>
+        <p>Same login as the AwoX HomeControl / EGLO app. The password is used once and not stored.</p>
+        <label class="field"><span>Email</span><input type="text" id="email" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Password</span><input type="password" id="password"></label>
+        <div class="actions">
+          <button class="btn primary" id="import" type="button">Import</button>
+          <button class="btn" id="scan" type="button">Scan for nearby lights</button>
+        </div>
+        <div class="msg" id="importMsg" hidden></div>
+        <div class="list" id="choices"></div>
+      </div>
+
+      <div class="section">
+        <h2>Connection</h2>
+        <label class="field"><span>Light name</span><input type="text" id="sName" maxlength="40"></label>
+        <div class="two">
+          <label class="field"><span>Mesh name</span><input type="text" id="sMesh" maxlength="16" spellcheck="false"></label>
+          <label class="field"><span>Mesh password</span><input type="text" id="sMeshPass" maxlength="16" spellcheck="false"></label>
+        </div>
+        <div class="two">
+          <label class="field"><span>Mesh ID</span><input type="number" id="sMeshId" min="1" max="65535"></label>
+          <label class="field"><span>Bluetooth address</span><input type="text" id="sMac" placeholder="A4:C1:38:…" spellcheck="false"></label>
+        </div>
+        <div class="two">
+          <label class="field"><span>Front zone</span><input type="number" id="sFront" min="1" max="255"></label>
+          <label class="field"><span>Back zone</span><input type="number" id="sBack" min="1" max="255"></label>
+        </div>
+        <p>Your light uses zone 1 for both: white settings drive the front, colour settings drive the back.</p>
+      </div>
+
+      <div class="section">
+        <h2>Behaviour</h2>
+        <label class="field"><span>Let other devices use the light after</span>
+          <select id="sRelease"><option value="15">15 seconds without use</option><option value="30">30 seconds without use</option><option value="60">1 minute without use</option><option value="300">5 minutes without use</option><option value="0">Never</option></select></label>
+        <label class="check"><input type="checkbox" id="sStartup"> Start with Windows</label>
+        <label class="check"><input type="checkbox" id="sRestore"> Turn the light on with the last look when Windows starts</label>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="saveSettings" type="button">Save settings</button>
+        <button class="btn" id="blink" type="button">Blink the light</button>
+      </div>
+      <div class="msg" id="settingsMsg" hidden></div>
+
+      <div class="section">
+        <h2>Log</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </main>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+
+// ---------- bridge to the Windows app (mocked when opened in a normal browser) ----------
+const host = window.chrome && window.chrome.webview ? window.chrome.webview : null;
+function send(msg) { if (host) host.postMessage(msg); else mockHost(msg); }
+let S = { settings: {}, state: { on: true, brightness: 80, kelvin: 4000, hue: 260, saturation: 80 }, scenes: [], custom: [], status: { state: 'Idle', text: 'Not connected' }, startup: false, pinned: false };
+
+// ---------- colour helpers ----------
+function hsv(h, s, v) { const f = (n) => { const k = (n + h / 60) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); }; return [f(5), f(3), f(1)].map((x) => Math.round(x * 255)); }
+function kelvin(k) { const t = k / 100; let r = t <= 66 ? 255 : 329.7 * Math.pow(t - 60, -0.1332), g = t <= 66 ? 99.47 * Math.log(t) - 161.12 : 288.12 * Math.pow(t - 60, -0.0755), b = t >= 66 ? 255 : t <= 19 ? 0 : 138.52 * Math.log(t - 10) - 305.04; return [r, g, b].map((x) => Math.max(0, Math.min(255, Math.round(x)))); }
+const css = (a) => `rgb(${a.join(',')})`;
+const NAMES = [[12, 'Red'], [40, 'Orange'], [66, 'Yellow'], [160, 'Green'], [200, 'Turquoise'], [252, 'Blue'], [290, 'Violet'], [338, 'Pink'], [361, 'Red']];
+const colourName = (h, s) => s < 18 ? 'White' : NAMES.find(([lim]) => h < lim)[1];
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ---------- light view ----------
+function render() {
+  const s = S.state;
+  $('title').textContent = S.settings.name || 'Ceiling light';
+  $('stage').classList.toggle('off', !s.on);
+  $('power').setAttribute('aria-pressed', s.on);
+  $('bri').value = s.brightness; $('briOut').textContent = s.brightness + ' %';
+  $('temp').value = s.kelvin; $('tempOut').textContent = s.kelvin + ' K';
+  const root = document.documentElement.style;
+  root.setProperty('--front', css(kelvin(s.kelvin)));
+  root.setProperty('--back', css(hsv(s.hue, s.saturation / 100, 1)));
+  $('disc').style.filter = `brightness(${(0.62 + s.brightness / 260).toFixed(2)})`;
+  $('halo').style.opacity = (0.3 + s.brightness / 140).toFixed(2);
+  $('readout').innerHTML = s.on ? `Front ${s.kelvin} K<br>Back ${colourName(s.hue, s.saturation).toLowerCase()}, ${s.brightness} %` : 'Off';
+  $('colName').textContent = colourName(s.hue, s.saturation);
+  $('colVal').textContent = `${s.hue}°, ${s.saturation} % saturation`;
+  placeDot();
+}
+
+function renderStatus() {
+  $('status').dataset.s = S.status.state; $('statusText').textContent = S.status.text;
+}
+
+function renderChips() {
+  const temps = [[2700, 'Warm'], [3500, 'Soft'], [4000, 'Neutral'], [5000, 'Cool'], [6500, 'Daylight']];
+  $('tempChips').innerHTML = temps.map(([k, n]) => `<button class="chip" type="button" data-k="${k}" title="${k} K" style="--c:${css(kelvin(k))}"><i></i>${n}</button>`).join('');
+  const cols = [[0, 100, 'Red'], [28, 92, 'Amber'], [52, 90, 'Gold'], [135, 85, 'Green'], [188, 85, 'Teal'], [228, 90, 'Blue'], [272, 80, 'Violet'], [318, 70, 'Pink'], [32, 12, 'Warm white']];
+  $('swatches').innerHTML = cols.map(([h, s, n]) => `<button class="sw" type="button" data-h="${h}" data-s="${s}" title="${n}" aria-label="${n}" style="background:${css(hsv(h, s / 100, 1))}"></button>`).join('');
+}
+
+function renderScenes() {
+  const pv = (st) => `<span class="pv"><i style="background:${st.on ? css(kelvin(st.kelvin)) : '#2a2f37'}"></i><i style="background:${st.on ? css(hsv(st.hue, st.saturation / 100, 1)) : '#2a2f37'}"></i></span>`;
+  const builtin = S.scenes.map((sc, i) => `<button class="scene" type="button" data-b="${i}"><b>${esc(sc.name)}</b>${pv(sc.state)}</button>`);
+  const custom = S.custom.map((sc, i) => `<div class="scene" role="button" tabindex="0" data-c="${i}"><b>${esc(sc.name)}</b>${pv(sc.state)}<span class="del" role="button" tabindex="0" data-del="${i}" aria-label="Delete ${esc(sc.name)}">×</span></div>`);
+  $('scenes').innerHTML = [...builtin, ...custom].join('');
+  fit();
+}
+
+// colour wheel: angle = hue, distance from centre = saturation
+const wheel = $('wheel'), cv = $('wheelCanvas');
+(function drawWheel() {
+  const ctx = cv.getContext('2d'), n = cv.width, r = n / 2, img = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const dx = x - r + 0.5, dy = y - r + 0.5, d = Math.hypot(dx, dy) / r, i = (y * n + x) * 4;
+    if (d > 1) { img.data[i + 3] = 0; continue; }
+    const h = (Math.atan2(dy, dx) * 180 / Math.PI + 450) % 360;
+    const [R, G, B] = hsv(h, d, 1);
+    img.data[i] = R; img.data[i + 1] = G; img.data[i + 2] = B; img.data[i + 3] = d > 0.985 ? Math.round((1 - d) / 0.015 * 255) : 255;
+  }
+  ctx.putImageData(img, 0, 0);
+})();
+function placeDot() {
+  const s = S.state, a = (s.hue - 90) * Math.PI / 180, rr = 66 * (s.saturation / 100);
+  const dot = $('wheelDot');
+  dot.style.left = (66 + Math.cos(a) * rr) + 'px'; dot.style.top = (66 + Math.sin(a) * rr) + 'px';
+  dot.style.background = css(hsv(s.hue, s.saturation / 100, 1));
+  wheel.setAttribute('aria-valuenow', s.hue); wheel.setAttribute('aria-valuetext', `${colourName(s.hue, s.saturation)}, ${s.saturation} % saturation`);
+}
+function pickAt(ev) {
+  const b = wheel.getBoundingClientRect(), dx = ev.clientX - b.left - b.width / 2, dy = ev.clientY - b.top - b.height / 2;
+  const hue = Math.round((Math.atan2(dy, dx) * 180 / Math.PI + 450) % 360) % 360;
+  const sat = Math.round(Math.min(1, Math.hypot(dx, dy) / (b.width / 2)) * 100);
+  setColour(hue, sat);
+}
+let dragging = false;
+wheel.addEventListener('pointerdown', (e) => { dragging = true; wheel.setPointerCapture(e.pointerId); pickAt(e); });
+wheel.addEventListener('pointermove', (e) => { if (dragging) pickAt(e); });
+wheel.addEventListener('pointerup', () => { dragging = false; });
+wheel.addEventListener('keydown', (e) => {
+  const s = S.state, k = e.key;
+  if (k === 'ArrowLeft') setColour((s.hue + 355) % 360, s.saturation);
+  else if (k === 'ArrowRight') setColour((s.hue + 5) % 360, s.saturation);
+  else if (k === 'ArrowUp') setColour(s.hue, Math.min(100, s.saturation + 5));
+  else if (k === 'ArrowDown') setColour(s.hue, Math.max(0, s.saturation - 5));
+  else return;
+  e.preventDefault();
+});
+
+function setColour(hue, sat) { S.state.hue = hue; S.state.saturation = sat; S.state.on = true; render(); send({ cmd: 'color', hue, sat }); }
+
+$('bri').addEventListener('input', () => { S.state.brightness = +$('bri').value; S.state.on = true; render(); send({ cmd: 'brightness', value: S.state.brightness }); });
+$('temp').addEventListener('input', () => { S.state.kelvin = +$('temp').value; render(); send({ cmd: 'kelvin', value: S.state.kelvin }); });
+$('tempChips').addEventListener('click', (e) => { const b = e.target.closest('[data-k]'); if (!b) return; S.state.kelvin = +b.dataset.k; S.state.on = true; render(); send({ cmd: 'kelvin', value: S.state.kelvin }); });
+$('swatches').addEventListener('click', (e) => { const b = e.target.closest('[data-h]'); if (b) setColour(+b.dataset.h, +b.dataset.s); });
+$('power').addEventListener('click', () => { S.state.on = !S.state.on; render(); send({ cmd: 'power', on: S.state.on }); });
+$('status').addEventListener('click', () => send({ cmd: 'connect' }));
+
+function applySceneState(st) { S.state = { ...st }; render(); send({ cmd: 'apply', state: S.state }); }
+$('scenes').addEventListener('click', (e) => {
+  const del = e.target.closest('[data-del]');
+  if (del) { e.stopPropagation(); const n = S.custom[+del.dataset.del].name; send({ cmd: 'deleteScene', index: +del.dataset.del }); toast(`Deleted ${n}`); return; }
+  const b = e.target.closest('[data-b]'); if (b) { applySceneState(S.scenes[+b.dataset.b].state); toast(S.scenes[+b.dataset.b].name); return; }
+  const c = e.target.closest('[data-c]'); if (c) { applySceneState(S.custom[+c.dataset.c].state); toast(S.custom[+c.dataset.c].name); }
+});
+$('scenes').addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[data-c], [data-del]')) { e.preventDefault(); e.target.click(); } });
+function saveScene() {
+  const name = $('sceneName').value.trim() || `My look ${S.custom.length + 1}`;
+  send({ cmd: 'saveScene', name, state: S.state });
+  $('saveRow').hidden = true; toast(`Saved ${name}`); fit();
+}
+$('sceneSave').addEventListener('click', saveScene);
+$('addScene').addEventListener('click', () => { $('saveRow').hidden = false; $('sceneName').value = ''; $('sceneName').focus(); fit(); });
+$('sceneName').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveScene(); if (e.key === 'Escape') { $('saveRow').hidden = true; fit(); e.stopPropagation(); } });
+$('sceneCancel').addEventListener('click', () => { $('saveRow').hidden = true; fit(); });
+
+// ---------- header ----------
+$('close').addEventListener('click', () => send({ cmd: 'close' }));
+$('pin').addEventListener('click', () => { S.pinned = !S.pinned; $('pin').setAttribute('aria-pressed', S.pinned); send({ cmd: 'pin', value: S.pinned }); toast(S.pinned ? 'Stays open, drag the top bar to move it' : 'Closes when you click elsewhere'); });
+$('drag').addEventListener('pointerdown', (e) => { if (e.button === 0 && !e.target.closest('button')) send({ cmd: 'drag' }); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') send({ cmd: 'close' }); });
+
+// ---------- settings view ----------
+function showView(name) {
+  $('viewLight').hidden = name !== 'light'; $('viewSettings').hidden = name !== 'settings';
+  if (name === 'settings') fillSettings();
+  fit();
+}
+$('toSettings').addEventListener('click', () => showView($('viewSettings').hidden ? 'settings' : 'light'));
+$('back').addEventListener('click', () => showView('light'));
+function fillSettings() {
+  const st = S.settings;
+  $('sName').value = st.name || ''; $('sMesh').value = st.meshName || ''; $('sMeshPass').value = st.meshPassword || '';
+  $('sMeshId').value = st.meshId || ''; $('sMac').value = st.mac || '';
+  $('sFront').value = st.frontZone || 1; $('sBack').value = st.backZone || 1;
+  $('sRelease').value = String(st.releaseAfterSeconds ?? 30);
+  $('sStartup').checked = !!S.startup; $('sRestore').checked = !!st.turnOnAtStartup;
+}
+function note(id, text, err) { const m = $(id); m.hidden = !text; m.textContent = text || ''; m.className = 'msg' + (err ? ' err' : ''); fit(); }
+$('saveSettings').addEventListener('click', () => {
+  const st = {
+    name: $('sName').value.trim() || 'Ceiling light', meshName: $('sMesh').value, meshPassword: $('sMeshPass').value,
+    meshId: +$('sMeshId').value || 0, mac: $('sMac').value.trim(), frontZone: +$('sFront').value || 1, backZone: +$('sBack').value || 1,
+    releaseAfterSeconds: +$('sRelease').value, turnOnAtStartup: $('sRestore').checked,
+  };
+  if (!st.meshName || !st.meshPassword) return note('settingsMsg', 'Enter the mesh name and password, or use Import.', true);
+  if (!(st.meshId > 0 && st.meshId < 65536)) return note('settingsMsg', 'Enter the mesh ID (a number up to 65535), or use Import.', true);
+  if (!/^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test(st.mac)) return note('settingsMsg', 'Enter the Bluetooth address, or use Import or Scan.', true);
+  send({ cmd: 'saveSettings', settings: st, startup: $('sStartup').checked });
+});
+$('blink').addEventListener('click', () => send({ cmd: 'blink' }));
+$('import').addEventListener('click', () => {
+  const email = $('email').value.trim(), password = $('password').value;
+  if (!email || !password) return note('importMsg', 'Enter the email and password of your EGLO app account.', true);
+  note('importMsg', 'Signing in…'); $('import').disabled = true;
+  send({ cmd: 'import', email, password });
+});
+$('scan').addEventListener('click', () => { note('importMsg', 'Scanning for 6 seconds. Close the light app on your phone first.'); $('scan').disabled = true; send({ cmd: 'scan' }); });
+let choices = [];
+function showChoices(items) {
+  choices = items;
+  $('choices').innerHTML = items.map((c, i) => `<button type="button" data-i="${i}"><span>${esc(c.label)}</span><span>${esc(c.meta)}</span></button>`).join('');
+  fit();
+}
+$('choices').addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (b) choices[+b.dataset.i].pick(); });
+
+// ---------- messages from the Windows app ----------
+function onHostMessage(m) {
+  switch (m.type) {
+    case 'init':
+      Object.assign(S, m); renderChips(); render(); renderStatus(); renderScenes();
+      $('pin').setAttribute('aria-pressed', !!S.pinned);
+      $('log').textContent = (m.log || []).slice().reverse().join('\n');
+      if (m.view) showView(m.view); else fit();
+      break;
+    case 'state': S.state = m.state; render(); break;
+    case 'status': S.status = m.status; renderStatus(); break;
+    case 'custom': S.custom = m.custom; renderScenes(); break;
+    case 'log': $('log').textContent = m.line + '\n' + $('log').textContent; break;
+    case 'view': showView(m.view); break;
+    case 'settingsSaved':
+      S.settings = m.settings; S.startup = m.startup; render(); note('settingsMsg', 'Saved.'); break;
+    case 'import':
+      $('import').disabled = false; $('password').value = '';
+      if (!m.ok) { note('importMsg', m.error, true); showChoices([]); break; }
+      $('sMesh').value = m.meshName; $('sMeshPass').value = m.meshPassword;
+      const pickLight = (l) => { $('sMeshId').value = l.meshId; $('sMac').value = l.mac; $('sName').value = l.name; note('importMsg', `Selected ${l.name}. Check the details below and save.`); };
+      if (m.lights.length === 1) { pickLight(m.lights[0]); showChoices([]); }
+      else if (!m.lights.length) note('importMsg', 'Key imported, but the account lists no lights. Use Scan to find the address.');
+      else { note('importMsg', 'Imported. Choose your ceiling light:'); showChoices(m.lights.map((l) => ({ label: l.name, meta: `ID ${l.meshId}`, pick: () => pickLight(l) }))); }
+      break;
+    case 'scan':
+      $('scan').disabled = false;
+      if (!m.devices.length) { note('importMsg', 'Nothing found. Check that Bluetooth is on and the light has power.', true); showChoices([]); break; }
+      note('importMsg', 'The likely EGLO lights are listed first. Choose one to use its address:');
+      showChoices(m.devices.map((d) => ({ label: (d.likely ? 'Likely EGLO light' : (d.name || 'Unnamed device')), meta: `${d.mac}, ${d.rssi} dBm`, pick: () => { $('sMac').value = d.mac; note('importMsg', `Address ${d.mac} selected. Save to use it.`); } })));
+      break;
+    case 'toast': toast(m.text); break;
+  }
+}
+if (host) host.addEventListener('message', (e) => onHostMessage(e.data));
+
+// window height follows the content
+let lastH = 0;
+function fit() { requestAnimationFrame(() => { const h = Math.ceil($('app').getBoundingClientRect().height); if (h !== lastH) { lastH = h; send({ cmd: 'resize', height: h }); } }); }
+
+let toastTimer;
+function toast(text) { const t = $('toast'); t.textContent = text; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), 2200); }
+
+// ---------- mock host for testing in a normal browser ----------
+function mockHost(msg) {
+  window.__sent = window.__sent || []; window.__sent.push(msg);
+  if (msg.cmd === 'ready') setTimeout(() => onHostMessage({
+    type: 'init', settings: { name: 'Living room', meshName: 'm', meshPassword: 'p', meshId: 38765, mac: 'A4:C1:38:6D:97:12', frontZone: 1, backZone: 1, releaseAfterSeconds: 30 },
+    state: { on: true, brightness: 70, kelvin: 3200, hue: 268, saturation: 78 }, startup: true, status: { state: 'Connected', text: 'Connected' },
+    scenes: [['Bright', 100, 5000, 210, 15], ['Cozy', 45, 2700, 28, 85], ['Reading', 85, 4000, 30, 50], ['Movie', 25, 2700, 235, 90], ['Night', 8, 2700, 15, 95]].map(([name, brightness, kelvin, hue, saturation]) => ({ name, state: { on: true, brightness, kelvin, hue, saturation } })),
+    custom: [{ name: 'Gaming', state: { on: true, brightness: 60, kelvin: 5000, hue: 190, saturation: 90 } }], log: ['16:30:01 login reply 0d…'],
+  }), 0);
+}
+send({ cmd: 'ready' });
+</script>
+</body>
+</html>
